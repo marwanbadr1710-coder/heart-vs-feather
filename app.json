@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Heart vs Feather",
+    "slug": "heart-vs-feather",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d1328",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.heartvsfeather.game",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.heartvsfeather.game",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0d1328"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2a951ad2-9052-4641-a77a-836e5186d513"
+      }
+    },
+    "owner": "marwan17"
+  }
+}

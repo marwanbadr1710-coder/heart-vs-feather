@@ -1,0 +1,19 @@
+{
+  "name": "heart-vs-feather",
+  "version": "1.0.0",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "postinstall": "node scripts/build-game.js"
+  },
+  "dependencies": {
+    "expo": "~58.0.0",
+    "react": "19.3.0",
+    "react-native": "0.88.x",
+    "react-native-webview": "*",
+    "three": "0.128.0"
+  }
+}
