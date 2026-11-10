@@ -184,22 +184,55 @@ const T=THREE;
 const view=document.getElementById("view"),cv=document.getElementById("cv"),capEl=document.getElementById("cap"),fadeEl=document.getElementById("fade"),locEl=document.getElementById("locname");
 let renderer;
 try{renderer=new T.WebGLRenderer({canvas:cv,antialias:true})}catch(e){view.hidden=true;return noop}
-renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+renderer.setPixelRatio(Math.min(1.75,window.devicePixelRatio||1));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
 const RM=!!(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches);
 const scene=new T.Scene();
 const camera=new T.PerspectiveCamera(64,1,0.03,1400);scene.add(camera);
+// the outdoor town lives in one group and every building interior in its own, so only the place you're in is drawn
+const worldG=new T.Group();scene.add(worldG);
+const ROOMG={};
+let ROOT=worldG,SH=true;
 
 /* ---- helpers ---- */
 const MC={};
 function M(c,o){const k=c+(o?JSON.stringify(o):"");if(!MC[k])MC[k]=new T.MeshLambertMaterial(Object.assign({color:c,flatShading:true},o||{}));return MC[k]}
-function add(geo,mat,x,y,z,p){const m=new T.Mesh(geo,typeof mat==="string"?M(mat):mat);m.position.set(x,y,z);(p||scene).add(m);return m}
+// surface textures are painted in code, so nothing has to download
+function mkTex(kind){
+  const c=document.createElement("canvas");c.width=c.height=128;const g=c.getContext("2d");
+  g.fillStyle="#ececec";g.fillRect(0,0,128,128);
+  const speck=(n,a)=>{for(let i=0;i<n;i++){const v=Math.random()<.5?0:255;g.fillStyle="rgba("+v+","+v+","+v+","+(Math.random()*a).toFixed(3)+")";g.fillRect(Math.random()*128,Math.random()*128,1+Math.random()*2,1+Math.random()*2)}};
+  if(kind==="brick"){speck(900,.1);g.strokeStyle="rgba(60,40,20,.35)";g.lineWidth=1.5;
+    for(let r=0;r<8;r++){const y=r*16;g.beginPath();g.moveTo(0,y+.5);g.lineTo(128,y+.5);g.stroke();for(let x=(r%2?16:0);x<128;x+=32){g.beginPath();g.moveTo(x+.5,y);g.lineTo(x+.5,y+16);g.stroke()}}
+    for(let i=0;i<14;i++){g.fillStyle="rgba(90,60,30,"+(.05+Math.random()*.08).toFixed(3)+")";g.fillRect(Math.floor(Math.random()*4)*32,Math.floor(Math.random()*8)*16,32,16)}}
+  else if(kind==="stone"){speck(700,.08);g.strokeStyle="rgba(70,55,30,.3)";g.lineWidth=2;
+    for(let r=0;r<4;r++){const y=r*32;g.beginPath();g.moveTo(0,y+1);g.lineTo(128,y+1);g.stroke();for(let x=(r%2?32:0);x<128;x+=64){g.beginPath();g.moveTo(x+1,y);g.lineTo(x+1,y+32);g.stroke()}}}
+  else if(kind==="sand"){speck(1600,.09);g.strokeStyle="rgba(120,90,40,.1)";g.lineWidth=2;for(let i=0;i<7;i++){const y=i*18+6;g.beginPath();g.moveTo(0,y);g.bezierCurveTo(40,y-6,88,y+6,128,y);g.stroke()}}
+  else if(kind==="rock"){speck(1200,.12);g.strokeStyle="rgba(70,40,20,.22)";for(let i=0;i<12;i++){g.lineWidth=1+Math.random()*3;const y=Math.random()*128;g.beginPath();g.moveTo(0,y);g.lineTo(128,y+(Math.random()-.5)*14);g.stroke()}}
+  else{speck(900,.07);g.strokeStyle="rgba(80,60,40,.18)";g.lineWidth=1;for(let i=0;i<5;i++){let x=Math.random()*128,y=Math.random()*128;g.beginPath();g.moveTo(x,y);for(let k=0;k<5;k++){x+=(Math.random()-.5)*26;y+=Math.random()*18;g.lineTo(x,y)}g.stroke()}}
+  const t=new T.CanvasTexture(c);t.wrapS=t.wrapT=T.RepeatWrapping;return t}
+const TEX={};
+function MT(c,kind){const k=c+"|"+kind;if(!MC[k]){if(!TEX[kind])TEX[kind]=mkTex(kind);MC[k]=new T.MeshPhongMaterial({color:c,map:TEX[kind],flatShading:true,shininess:3,specular:0x0f0d0a})}return MC[k]}
+function add(geo,mat,x,y,z,p){const m=new T.Mesh(geo,typeof mat==="string"?M(mat):mat);m.position.set(x,y,z);m.castShadow=SH;m.receiveShadow=SH;(p||ROOT).add(m);return m}
 function box(w,h,d,c,x,z,y,p){return add(new T.BoxGeometry(w,h,d),c,x,(y||0)+h/2,z,p)}
+// a box with a tiling texture: the texture repeats every `tile` metres instead of stretching
+function tbox(w,h,d,c,kind,x,z,y,p,tile){const m=box(w,h,d,MT(c,kind),x,z,y,p),uv=m.geometry.attributes.uv,s=tile||2;
+  for(let i=0;i<24;i++){const f=i>>2,su=(f<2?d:w)/s,sv=(f===2||f===3?d:h)/s;uv.setXY(i,uv.getX(i)*su,uv.getY(i)*sv)}return m}
 function cyl(rt,rb,h,c,x,z,y,seg,p){return add(new T.CylinderGeometry(rt,rb,h,seg||8),c,x,(y||0)+h/2,z,p)}
 function ball(r,c,x,y,z,p,sx,sy,sz){const m=add(new T.SphereGeometry(r,10,8),c,x,y,z,p);if(sx)m.scale.set(sx,sy,sz);return m}
 function cone(r,h,seg,c,x,z,y,p){return add(new T.ConeGeometry(r,h,seg),c,x,(y||0)+h/2,z,p)}
 const flameMat=new T.MeshBasicMaterial({color:"#ffb347"});
 const glowMat=new T.MeshBasicMaterial({color:"#ffd36b"});
+const winMat=new T.MeshBasicMaterial({color:"#2a1d14"});   // windows: dark by day, glowing at night
+const skyMat=new T.MeshBasicMaterial({color:"#f3cf9a"});   // openings seen from indoors: follow the sky
 const rnd=(a,b)=>a+Math.random()*(b-a);
+// oil lamps and braziers: real light at night
+const LAMPS=[];
+function lamp(x,z,y,always,post){if(post!==false)cyl(0.05,0.07,y,"#5a4632",x,z,0,6);cyl(0.14,0.09,0.12,"#8a5636",x,z,y,8);
+  const f=add(new T.ConeGeometry(0.09,0.3,6),flameMat,x,y+0.27,z);f.castShadow=false;
+  const l=new T.PointLight(0xff9a3c,0,15,2);l.position.set(x,y+0.4,z);ROOT.add(l);LAMPS.push({l,f,always:!!always,ph:Math.random()*9,k:1.25})}
+function brazier(x,z){cyl(0.28,0.18,1,"#5a4632",x,z,0,8);const f=add(new T.ConeGeometry(0.2,0.55,6),flameMat,x,1.28,z);f.castShadow=false;
+  const l=new T.PointLight(0xff9a3c,0,20,2);l.position.set(x,1.7,z);ROOT.add(l);LAMPS.push({l,f,always:true,ph:Math.random()*9,k:1.7})}
 
 /* ---- sky, light ---- */
 const skyU={top:{value:new T.Color("#6aa6cf")},bot:{value:new T.Color("#f3cf9a")}};
@@ -209,8 +242,17 @@ const sky=new T.Mesh(new T.SphereGeometry(900,24,12),new T.ShaderMaterial({unifo
 scene.add(sky);
 scene.fog=new T.Fog("#f3cf9a",70,480);
 const hemi=new T.HemisphereLight(0xfff0d8,0x8a6a3c,0.85);scene.add(hemi);
-const sun=new T.DirectionalLight(0xffe2b8,0.95);sun.position.set(-60,90,40);scene.add(sun);
+const sun=new T.DirectionalLight(0xffe2b8,0.95);sun.position.set(-60,90,40);scene.add(sun);scene.add(sun.target);
+sun.castShadow=true;{const SM=Math.min(window.innerWidth,window.innerHeight)<700?1024:2048;sun.shadow.mapSize.set(SM,SM);
+  const sc=sun.shadow.camera;sc.left=-42;sc.right=42;sc.top=42;sc.bottom=-42;sc.near=1;sc.far=320;sc.updateProjectionMatrix();sun.shadow.bias=-0.0012;sun.shadow.normalBias=0.06}
 const moon=new T.DirectionalLight(0x8fa8ff,0);moon.position.set(40,60,-30);scene.add(moon);
+const sunDisc=new T.Mesh(new T.SphereGeometry(30,16,12),new T.MeshBasicMaterial({color:0xfff1c2,fog:false}));scene.add(sunDisc);
+const moonDisc=new T.Mesh(new T.SphereGeometry(18,16,12),new T.MeshBasicMaterial({color:0xdfe6ff,fog:false}));scene.add(moonDisc);
+// dust hanging in the air
+const DN=220,dustA=new Float32Array(DN*3);for(let i=0;i<DN;i++){dustA[i*3]=rnd(-15,15);dustA[i*3+1]=rnd(0.2,7);dustA[i*3+2]=rnd(-15,15)}
+const dustG=new T.BufferGeometry();dustG.setAttribute("position",new T.Float32BufferAttribute(dustA,3));
+const dustMat=new T.PointsMaterial({color:0xfff0cc,size:0.07,transparent:true,opacity:0.5,depthWrite:false});
+const dust=new T.Points(dustG,dustMat);dust.frustumCulled=false;scene.add(dust);
 const torchLight=new T.PointLight(0xff9a3c,0,10,2);torchLight.position.set(0.25,0.05,-0.45);camera.add(torchLight);
 const starG=new T.BufferGeometry();const sp=[];for(let i=0;i<700;i++){const th=Math.random()*Math.PI*2,ph=Math.random()*1.35;sp.push(Math.cos(th)*Math.sin(ph)*800,Math.cos(ph)*800,Math.sin(th)*Math.sin(ph)*800)}
 starG.setAttribute("position",new T.Float32BufferAttribute(sp,3));
@@ -218,67 +260,125 @@ const starMat=new T.PointsMaterial({color:0xffffff,size:2,sizeAttenuation:false,
 const stars=new T.Points(starG,starMat);scene.add(stars);
 
 /* ---- world ---- */
-const ground=add(new T.PlaneGeometry(2000,2000),"#d6b47a",0,0,0);ground.rotation.x=-Math.PI/2;
+const groundTex=mkTex("sand");groundTex.repeat.set(520,520);
+const ground=add(new T.PlaneGeometry(2000,2000),new T.MeshPhongMaterial({color:"#e4c38a",map:groundTex,shininess:3,specular:0x0f0d0a}),0,0,0);ground.rotation.x=-Math.PI/2;ground.castShadow=false;
 box(900,0.06,3,"#9c7b48",0,-27);
 const wg=new T.PlaneGeometry(900,64,90,8);
-const water=add(wg,new T.MeshLambertMaterial({color:"#2c7a86",flatShading:true}),0,0.06,-60);water.rotation.x=-Math.PI/2;
+const water=add(wg,new T.MeshPhongMaterial({color:"#2c7a86",specular:0xfff2c0,shininess:80,flatShading:true,transparent:true,opacity:0.93}),0,0.06,-60);water.rotation.x=-Math.PI/2;water.castShadow=false;water.receiveShadow=false;
 const wp=wg.attributes.position,wbase=Float32Array.from(wp.array);
 const rg=new T.CylinderGeometry(0.02,0.05,1.8,4);rg.translate(0,0.9,0);
 const reeds=new T.InstancedMesh(rg,M("#6b8a3a"),520);const dm=new T.Object3D();let ri=0;
 while(ri<520){const cx=rnd(-170,170);if(Math.abs(cx)<5)continue;for(let j=0;j<10&&ri<520;j++){dm.position.set(cx+rnd(-1.5,1.5),0,-27.6-rnd(0,3));dm.rotation.set(rnd(-.18,.18),0,rnd(-.18,.18));dm.scale.setScalar(rnd(.6,1.4));dm.updateMatrix();reeds.setMatrixAt(ri++,dm.matrix)}}
-reeds.instanceMatrix.needsUpdate=true;scene.add(reeds);
-function palm(x,z,h){const g=new T.Group();g.position.set(x,0,z);g.rotation.z=rnd(-.08,.08);scene.add(g);cyl(0.15,0.26,h,"#7a5a36",0,0,0,6,g);
+reeds.instanceMatrix.needsUpdate=true;worldG.add(reeds);
+function palm(x,z,h){const g=new T.Group();g.position.set(x,0,z);g.rotation.z=rnd(-.08,.08);worldG.add(g);cyl(0.15,0.26,h,"#7a5a36",0,0,0,6,g);
   for(let i=0;i<8;i++){const piv=new T.Group();piv.position.y=h;piv.rotation.y=i*Math.PI/4+rnd(-.2,.2);const leaf=add(new T.BoxGeometry(0.4,0.05,2.6),"#4f7a32",0,-0.35,1.15,piv);leaf.rotation.x=0.5;g.add(piv)}
   ball(0.32,"#5b3b22",0,h-0.15,0,g)}
 [[6,-13,7],[-7,-12,6],[11,-24,8],[-14,-24,7],[28,-24,6],[-52,-24,8],[52,12,7],[-46,-9,6],[54,-27,7],[-22,9,6],[22,-12,6.5],[-60,6,7],[78,-4,6]].forEach(a=>palm(...a));
 /* home (origin) */
-box(10,3.4,4,"#b88a58",0,-7.5);box(10.1,0.18,4.1,"#eadfc6",0,-7.5,3.3);
-box(1.3,2.3,0.08,"#3a281b",0,-5.47);box(0.6,0.45,0.08,"#2a1d14",-3,-5.47,2.1);box(0.6,0.45,0.08,"#2a1d14",3,-5.47,2.1);
-box(0.5,2.2,12,"#a77a4c",-5,-1.5);box(0.5,2.2,12,"#a77a4c",5,-1.5);box(4,2.2,0.5,"#a77a4c",-3.25,4.3);box(4,2.2,0.5,"#a77a4c",3.25,4.3);box(0.5,2.6,0.6,"#8f6638",-1.4,4.3);box(0.5,2.6,0.6,"#8f6638",1.4,4.3);
+tbox(10,3.4,4,"#c79a66","brick",0,-7.5);box(10.1,0.18,4.1,"#eadfc6",0,-7.5,3.3);
+box(1.3,2.3,0.08,"#3a281b",0,-5.47);box(0.6,0.45,0.08,winMat,-3,-5.47,2.1);box(0.6,0.45,0.08,winMat,3,-5.47,2.1);
+tbox(0.5,2.2,12,"#b98a58","brick",-5,-1.5);tbox(0.5,2.2,12,"#b98a58","brick",5,-1.5);tbox(4,2.2,0.5,"#b98a58","brick",-3.25,4.3);tbox(4,2.2,0.5,"#b98a58","brick",3.25,4.3);box(0.5,2.6,0.6,"#8f6638",-1.4,4.3);box(0.5,2.6,0.6,"#8f6638",1.4,4.3);
 box(9.5,0.03,9.5,"#c9a46c",0,-0.5);
 cyl(0.45,0.75,1,"#8a5636",3.2,-3.6);ball(0.25,"#2a1a10",3.2,0.55,-3.1,null,1,0.8,0.4);
 cyl(0.22,0.32,0.8,"#b8643a",-3.8,-4.4);cyl(0.2,0.28,0.65,"#c97c4a",-3.2,-4.8);cyl(0.18,0.24,0.55,"#a5583a",-4.3,-3.8);
 box(2,0.03,1.4,"#c7a052",-2,-1.6);
 for(let i=0;i<6;i++)box(0.9,0.4*(i+1),0.55,"#a77a4c",4.25,-4.7+i*0.55);
 /* temple */
-box(6,10,3,"#e3d0a2",35.5,-4);box(6,10,3,"#e3d0a2",44.5,-4);
+tbox(6,10,3,"#ead8ac","stone",35.5,-4,0,null,3);tbox(6,10,3,"#ead8ac","stone",44.5,-4,0,null,3);
 [35.5,44.5].forEach(x=>{box(6.02,0.35,0.05,"#2f5fa8",x,-2.47,8.6);box(6.02,0.3,0.05,"#b5452f",x,-2.47,8.1);box(6.02,0.2,0.05,"#d9a93f",x,-2.47,7.7);
   for(let k=0;k<3;k++)box(0.8,3.6,0.05,["#b5452f","#2f8f8a","#c9a368"][k],x-1.6+k*1.6,-2.47,2.4)});
-box(3,7,2.4,"#d8c493",40,-4);box(1.8,4.6,0.06,"#241a12",40,-2.77);
+tbox(3,7,2.4,"#dfcc9c","stone",40,-4,0,null,3);box(1.8,4.6,0.06,"#241a12",40,-2.77);
 [33.3,37.7,42.3,46.7].forEach(x=>{cyl(0.08,0.1,13,"#7a5a36",x,-2.2);box(1.2,0.5,0.04,"#b5452f",x+0.65,-2.2,12)});
 function colossus(x,z){const c="#cbb68e";box(1.8,1.2,2.2,c,x,z);box(1.3,2.4,1.2,c,x,z-0.4,1.2);box(1.3,1.1,1.1,c,x,z+0.5,1.2);
   box(1.05,1.15,0.85,"#d9a93f",x,z-0.45,3.55);box(0.6,0.75,0.12,c,x,z+0.02,3.65);box(0.18,0.4,0.15,"#3a2a1e",x,z+0.1,3.35)}
 colossus(36.5,0.2);colossus(43.5,0.2);
 [32.5,35.5,44.5,47.5].forEach(x=>{cyl(0.5,0.55,6,"#e6d5ab",x,5);cyl(0.95,0.5,0.9,"#6f9a5a",x,5,6)});
 box(0.9,11,0.9,"#d9c69a",51,1);const pyr=cone(0.66,1.2,4,"#d9a93f",51,1,11);pyr.rotation.y=Math.PI/4;
-cyl(0.28,0.18,1,"#5a4632",37,9.5);add(new T.ConeGeometry(0.2,0.55,6),flameMat,37,1.28,9.5);
+brazier(37,9.5);brazier(43,9.5);
 /* market */
 [[-39.5,"#b8452f"],[-35,"#2f6fa8"],[-30.5,"#d29a2a"]].forEach(([x,c])=>{box(2.4,0.9,1.2,"#8a5d36",x,-1);
   [[-1.1,-0.5],[1.1,-0.5],[-1.1,-1.5],[1.1,-1.5]].forEach(([dx,dz])=>cyl(0.05,0.05,2.4,"#6a4a2a",x+dx,dz));
   box(2.8,0.06,1.8,c,x,-1,2.4);
   for(let k=0;k<7;k++)ball(0.12,["#e0a83a","#8a2a3a","#6f9a3c","#c9572e"][k%4],x-0.9+k*0.3,0.98,-1+rnd(-.3,.3));
   cyl(0.3,0.22,0.35,"#b08848",x+0.8,0.4);cyl(0.24,0.32,0.7,"#b8643a",x-0.9,0.3)});
-for(let i=-3;i<=3;i++){const h=rnd(3,5);box(4.6,h,4,["#b88a58","#a77a4c","#c09a68"][Math.abs(i)%3],-35+i*5,-8);box(1,1.9,0.06,"#2a1d14",-35+i*5,-5.97)}
+for(let i=-3;i<=3;i++){const h=rnd(3,5);tbox(4.6,h,4,["#c79a66","#b98a58","#cfa876"][Math.abs(i)%3],"brick",-35+i*5,-8);box(1,1.9,0.06,"#2a1d14",-35+i*5,-5.97);box(0.5,0.4,0.06,winMat,-35+i*5+1.4,-5.97,1.9)}
 /* fields */
 for(let i=0;i<8;i++)box(18,0.45,0.6,i%3===2?"#c9b04a":"#6e9a3c",-30,-14.5-i*1.3);
 box(18,0.05,0.4,"#2c7a86",-30,-13.6);
 box(0.25,2.8,0.25,"#7a5a36",-21,-22);const sh=box(0.14,0.14,5,"#7a5a36",-21,-22,2.8);sh.rotation.x=0.35;cyl(0.18,0.14,0.3,"#8a5636",-21,-24.4,1.6);
 /* necropolis */
-box(50,16,8,"#c4884a",62,-23);for(let k=0;k<8;k++)box(rnd(4,9),rnd(2,6),rnd(5,8),"#b97c42",40+k*6,-23,16);
+tbox(50,16,8,"#cf9354","rock",62,-23,0,null,7);for(let k=0;k<8;k++)tbox(rnd(4,9),rnd(2,6),rnd(5,8),"#c4884a","rock",40+k*6,-23,16,null,7);
 [56,62,68].forEach(x=>box(1.6,2.6,0.12,"#1a120c",x,-18.95));
 [55,69].forEach(x=>{box(2.6,2.2,2.6,"#c9a06a",x,-15.5);const c=cone(1.8,2.2,4,"#d6b07a",x,-15.5,2.2);c.rotation.y=Math.PI/4});
-box(1,0.7,0.6,"#bfae8a",62,-11);
+box(1,0.7,0.6,"#bfae8a",58.6,-11);
 /* tomb interior */
-box(4,0.05,18,"#7a6244",200,198);box(0.4,3.2,18,"#d9c39a",197.8,198);box(0.4,3.2,18,"#d9c39a",202.2,198);
+ROOMG.tomb=new T.Group();scene.add(ROOMG.tomb);ROOT=ROOMG.tomb;SH=false;
+tbox(4,0.05,18,"#8a7250","sand",200,198);tbox(0.4,3.2,18,"#e0cba2","plaster",197.8,198);tbox(0.4,3.2,18,"#e0cba2","plaster",202.2,198);
 box(4.8,0.3,18,"#14204a",200,198,3.2);box(4.8,3.2,0.4,"#d9c39a",200,189);box(4.8,3.2,0.4,"#d9c39a",200,207.2);
 [198.02,201.98].forEach(x=>{box(0.04,0.22,18,"#2f5fa8",x,198,2.7);box(0.04,0.18,18,"#b5452f",x,198,2.45);box(0.04,0.2,18,"#d9a93f",x,198,0.3);
   for(let k=0;k<6;k++){const z=191.5+k*2.4;box(0.04,1.3,0.5,["#b5452f","#2f8f8a","#e8e2d0","#3a2a1e"][k%4],x,z,0.75);ball(0.16,"#3a2a1e",x,2.2,z);for(let q=0;q<3;q++)box(0.04,0.18,0.18,"#2a2a2a",x,z+0.7,1+q*0.35)}});
 for(let k=0;k<50;k++)box(0.05,0.02,0.05,"#e8c65a",rnd(198.2,201.8),rnd(189.5,206.5),3.03);
 box(0.9,2,0.1,"#e8e2d0",200,189.25,0.3);box(0.42,0.45,0.1,"#3f8a4a",200,189.25,2.3);add(new T.ConeGeometry(0.22,0.6,6),"#e8e2d0",200,3.0,189.25);
 box(1.1,1,2.4,"#5b4220",200,193);box(0.5,0.6,0.1,"#d9a93f",200,194.21,0.3);
+ROOT=worldG;SH=true;
 /* desert */
 for(let k=0;k<16;k++)ball(rnd(8,16),"#dcb879",rnd(-110,110),-1.6,rnd(95,150),null,1,0.16,1);
 [[-48,190,34,42],[16,205,40,50],[72,192,22,28]].forEach(([x,z,r,h])=>{const p=cone(r,h,4,"#d9b98a",x,z);p.rotation.y=Math.PI/4});
+/* lamps around town */
+lamp(-1.4,4.3,2.6,false,false);lamp(1.4,4.3,2.6,false,false);lamp(-37.25,0.6,2.2);lamp(-32.75,0.6,2.2);lamp(60,-10,1.5);lamp(3,-23.6,1.6);
+/* the beer house sign */
+box(1.9,0.06,1.1,"#8a2a3a",-25,-5.4,2.35);cyl(0.2,0.14,0.45,"#b8643a",-25,-5.75,2.5);lamp(-26.1,-5.7,2);
+box(1.5,0.22,0.3,"#8f6638",0,-5.45,2.3);
+
+/* ---- building interiors ---- */
+function shell(key,ox,oz,w,d,h,wc,wk,fc){const g=new T.Group();scene.add(g);ROOMG[key]=g;ROOT=g;SH=false;
+  tbox(w,0.1,d,fc,"sand",ox,oz,-0.1);box(w+0.6,0.3,d+0.6,"#3a2a1c",ox,oz,h);
+  tbox(w+0.6,h,0.3,wc,wk,ox,oz-d/2-0.15);tbox(w+0.6,h,0.3,wc,wk,ox,oz+d/2+0.15);tbox(0.3,h,d,wc,wk,ox-w/2-0.15,oz);tbox(0.3,h,d,wc,wk,ox+w/2+0.15,oz);
+  box(1.3,2.3,0.08,"#1a120c",ox,oz+d/2-0.03);box(1.6,0.2,0.12,"#8f6638",ox,oz+d/2-0.05,2.3);
+  return g}
+/* your house */
+shell("house",300,0,9,7,3,"#c79a66","brick","#b99a66");
+box(0.9,0.06,1.9,"#d9c79a",296.7,-2.1);box(0.9,0.06,1.9,"#c9b27a",297.8,-2.1);box(0.9,0.06,1.9,"#d9c79a",296.7,0.2);
+[[296.7,-2.9],[297.8,-2.9],[296.7,-0.6]].forEach(([x,z])=>{box(0.3,0.14,0.12,"#8a5d36",x,z,0.06)});
+box(0.8,0.05,1.2,"#b5452f",297.8,-2,0.06);
+box(1.1,0.08,0.45,"#8a5d36",300,-3.25,0.95);box(1.3,1.5,0.1,"#3a281b",300,-3.44,0.95);
+box(0.26,0.34,0.2,"#d9a93f",300,-3.25,1.03);ball(0.13,"#d9a93f",300,1.5,-3.25);box(0.34,0.1,0.22,"#2f5fa8",300,-3.25,1.6);
+lamp(300.42,-3.25,1.03,true,false);lamp(296.6,2.4,1.1,true);
+box(1.5,0.35,0.9,"#8a5d36",301.9,0.5);ball(0.16,"#c98e4a",301.6,0.45,0.4,null,1.2,0.6,1);ball(0.16,"#c98e4a",302.1,0.45,0.7,null,1.2,0.6,1);cyl(0.07,0.05,0.14,"#d9a93f",302.3,0.3,0.35);cyl(0.07,0.05,0.14,"#b8643a",301.5,0.75,0.35);
+[[303.8,2.4,0.34,0.9],[303.8,1.6,0.28,0.75],[303.9,0.9,0.24,0.6],[303.2,2.6,0.2,0.5]].forEach(([x,z,r,h])=>{cyl(r*0.7,r,h,"#b8643a",x,z)});
+box(0.08,1.9,0.08,"#7a5a36",303,-2.4);box(0.08,1.9,0.08,"#7a5a36",304,-2.4);box(1.1,0.08,0.08,"#7a5a36",303.5,-2.4,1.82);box(1.1,0.08,0.08,"#7a5a36",303.5,-2.4,0.3);box(0.9,1.1,0.03,"#e8e2d0",303.5,-2.4,0.5);
+box(0.4,0.3,0.4,"#8a5d36",302.9,-1.5);
+box(2.2,0.03,1.6,"#b5452f",300,0.6);box(1.8,0.035,1.2,"#d9a93f",300,0.6);
+box(0.7,0.5,0.06,skyMat,297.6,-3.33,2.05);box(0.7,0.5,0.06,skyMat,302.4,-3.33,2.05);box(0.06,0.5,0.7,skyMat,304.33,0,2.05);
+/* the temple's inner hall */
+shell("hall",300,100,14,24,7,"#e3d0a2","stone","#cdb98c");
+[296,304].forEach(x=>{for(let z=93;z<=109;z+=4){cyl(0.6,0.66,6.2,"#e6d5ab",x,z,0,10);cyl(1,0.6,0.8,"#6f9a5a",x,z,6.2,10);cyl(0.68,0.68,0.3,"#b5452f",x,z,1.1,10);cyl(0.67,0.67,0.2,"#2f5fa8",x,z,1.45,10)}});
+[293.18,306.82].forEach(x=>{box(0.06,0.35,24,"#2f5fa8",x,100,5.6);box(0.06,0.3,24,"#b5452f",x,100,5.2);box(0.06,0.25,24,"#d9a93f",x,100,0.5);
+  for(let k=0;k<7;k++)box(0.06,2.2,0.9,["#b5452f","#2f8f8a","#c9a368","#3a2a1e"][k%4],x,90.5+k*3.2,1.4)});
+tbox(7,0.4,3.6,"#d8c493","stone",300,90.4);box(1.5,1,1.7,"#d9a93f",300,89.9,0.4);box(1.05,1.7,0.85,"#d9a93f",300,89.6,1.4);box(1.05,0.5,1,"#d9a93f",300,90.2,1.4);
+box(0.62,0.62,0.6,"#d9a93f",300,89.6,3.1);box(0.2,1.3,0.12,"#2f5fa8",299.85,89.55,3.7);box(0.2,1.3,0.12,"#b5452f",300.15,89.55,3.7);box(0.14,0.4,0.12,"#2f5fa8",300,89.95,2.75);
+box(5,6.4,0.08,"#14204a",300,88.2);for(let k=0;k<26;k++)box(0.07,0.07,0.03,"#e8c65a",rnd(297.7,302.3),88.26,rnd(0.6,6.2));
+box(1.7,0.85,0.9,"#bfae8a",300,93.6);ball(0.17,"#c98e4a",299.6,0.95,93.6,null,1.2,0.6,1);ball(0.2,"#8a4a2a",300.3,0.98,93.5,null,1.3,0.7,0.9);cyl(0.1,0.07,0.2,"#d9a93f",300,93.85,0.85);
+brazier(297.2,94.2);brazier(302.8,94.2);
+[296.5,303.5].forEach(x=>{box(0.9,0.06,0.5,skyMat,x,104,6.98);box(0.9,0.06,0.5,skyMat,x,96,6.98)});
+/* the beer house */
+shell("beer",300,200,10,8,3,"#b98a58","brick","#a98858");
+box(5.2,1,0.7,"#8a5d36",298.8,197);box(5.4,0.08,0.86,"#6a4a2a",298.8,197,1);
+[[297,197],[298.2,197.1],[299.6,196.95],[300.8,197.05]].forEach(([x,z],i)=>{cyl(0.08,0.06,0.16,i%2?"#d9a93f":"#b8643a",x,z,1.08)});
+[[304.3,197],[304.3,198.2],[304.3,199.4]].forEach(([x,z])=>{cyl(0.36,0.5,1.15,"#b8643a",x,z,0,10);cyl(0.38,0.38,0.06,"#6a4a2a",x,z,1.15,10)});
+[[297.4,199.9],[300.6,201.2],[302.6,199.2]].forEach(([x,z])=>{cyl(0.55,0.5,0.4,"#8a5d36",x,z,0,10);cyl(0.2,0.14,0.42,"#b8643a",x,z,0.4);
+  for(let k=0;k<3;k++){const a=k*2.1,s=cyl(0.012,0.012,0.7,"#c9a55a",x+Math.cos(a)*0.22,z+Math.sin(a)*0.22,0.55,5);s.rotation.z=Math.cos(a)*0.6;s.rotation.x=-Math.sin(a)*0.6;cyl(0.06,0.045,0.12,"#d9a93f",x+Math.cos(a+1)*0.38,z+Math.sin(a+1)*0.38,0.4)}
+  for(let k=0;k<3;k++){const a=k*2.1+0.5;box(0.5,0.05,0.5,"#c9b27a",x+Math.cos(a)*1,z+Math.sin(a)*1)}});
+lamp(296,203.2,1.6,true);lamp(303.6,202.6,1.6,true);lamp(298.8,197,1.08,true,false);
+box(0.06,0.45,0.7,skyMat,295.17,200,2.1);box(2.6,1,0.05,"#8a2a3a",298.8,196.2,1.5);box(2.2,0.6,0.06,"#d9a93f",298.8,196.24,1.7);
+/* the tomb: more to find, and the way out */
+ROOT=ROOMG.tomb;SH=false;
+box(1.3,2.3,0.08,"#0a0806",200,206.98);
+[[198.7,190.4],[199.2,190.1],[200.8,190.1],[201.3,190.4]].forEach(([x,z],i)=>{cyl(0.14,0.11,0.4,"#e8e2d0",x,z);ball(0.12,["#3a2a1e","#d9a93f","#3f8a4a","#b5452f"][i],x,0.5,z)});
+for(let k=0;k<14;k++)box(rnd(0.12,0.3),rnd(0.08,0.2),rnd(0.12,0.3),"#d9a93f",rnd(198.5,199.4),rnd(194.6,196.4));
+box(0.7,0.5,0.5,"#6a4a2a",201.2,195.6);box(0.74,0.08,0.54,"#d9a93f",201.2,195.6,0.5);cyl(0.2,0.14,0.5,"#2f5fa8",201.3,196.6);
+box(0.5,1.5,0.5,"#141414",198.7,203.8);box(0.3,0.3,0.4,"#141414",198.7,203.95,1.5);box(0.5,1.5,0.5,"#141414",201.3,203.8);box(0.3,0.3,0.4,"#141414",201.3,203.95,1.5);
+ROOT=worldG;SH=true;
 
 /* ---- locations ---- */
 const LOC={
@@ -290,8 +390,23 @@ const LOC={
  necro:{p:[62,-4],t:[62,2.5,-18],name:"The necropolis"},
  tomb:{p:[200,205.5],t:[200,1.3,190],name:"Inside a tomb",dark:1},
  desert:{p:[0,70],t:[0,8,180],name:"The desert"},
- town:{p:[0,10],t:[0,1.4,30],name:"The town"}
+ town:{p:[0,10],t:[0,1.4,30],name:"The town"},
+ house:{name:"Inside your house",indoor:1},hall:{name:"The temple hall",indoor:1},beer:{name:"The beer house",indoor:1}
 };
+LOC.tomb.indoor=1;
+// building interiors: walkable bounds, where scenes are staged inside, which menu they open, and where their door is outside
+const ROOMS={
+ house:{b:[295.85,304.15,-3.15,3.15],stage:{p:[300,1.4],t:[300,1.2,-3.3]},menu:"home",out:[0,-4.1]},
+ hall:{b:[293.35,306.65,88.35,111.65],stage:{p:[300,97.5],t:[300,2.6,89.6]},menu:"temple",out:[40,-1.2]},
+ beer:{b:[295.35,304.65,196.35,203.65],stage:{p:[300,201.6],t:[300,1.3,197]},menu:"market",only:["beer","friend","gossip","fight","senet","find"],out:[-25,-4.6]},
+ tomb:{b:[198.45,201.55,189.6,206.6],menu:"tomb",out:[62,-17]}
+};
+const DOORS=[
+ {x:0,z:-4.95,r:1.3,label:"Go inside your house",to:[300,2.3,0]},{x:300,z:3,r:1.2,label:"Go outside",to:[0,-4.1,Math.PI]},
+ {x:40,z:-2.1,r:1.7,label:"Enter the temple",to:[300,110.4,0]},{x:300,z:111.4,r:1.4,label:"Leave the temple",to:[40,-1.2,Math.PI]},
+ {x:-25,z:-5.3,r:1.4,label:"Enter the beer house",to:[300,202.8,0]},{x:300,z:203.5,r:1.2,label:"Leave the beer house",to:[-25,-4.6,Math.PI]},
+ {x:62,z:-18.2,r:1.6,label:"Enter the tomb",to:[200,205.5,0]},{x:200,z:206.4,r:1.3,label:"Leave the tomb",to:[62,-17,Math.PI]}
+];
 /* ---- player ---- */
 const PL={x:0,z:2.2,yaw:0,pitch:0};
 let locName="home",loc=LOC.home,camH=0.42,handScale=0.55,walkSpeed=1.1,baby=true,gateT=0;
@@ -301,16 +416,24 @@ function fwd(o){o=o||PL;return new T.Vector3(-Math.sin(o.yaw),0,-Math.cos(o.yaw)
 // solid things you can't walk through: [centre x, centre z, width, depth]
 const COL=[[0,-7.5,10,4],[-5,-1.5,.5,12],[5,-1.5,.5,12],[-3.25,4.3,4,.5],[3.25,4.3,4,.5],[3.2,-3.6,1.5,1.5],[-3.8,-4.4,1.6,1.6],[4.25,-3.3,.9,3.3],
  [35.5,-4,6,3],[44.5,-4,6,3],[40,-4,3,2.4],[36.5,.2,1.8,2.2],[43.5,.2,1.8,2.2],[32.5,5,1.1,1.1],[35.5,5,1.1,1.1],[44.5,5,1.1,1.1],[47.5,5,1.1,1.1],[51,1,.9,.9],[37,9.5,.6,.6],
- [-39.5,-1,2.8,1.8],[-35,-1,2.8,1.8],[-30.5,-1,2.8,1.8],[-35,-8,34.6,4],[62,-23,50,8],[55,-15.5,2.6,2.6],[69,-15.5,2.6,2.6],[62,-11,1,.6],
- [6,-13,.6,.6],[-7,-12,.6,.6],[11,-24,.6,.6],[-14,-24,.6,.6],[28,-24,.6,.6],[-52,-24,.6,.6],[52,12,.6,.6],[-46,-9,.6,.6],[-22,9,.6,.6],[22,-12,.6,.6],[-60,6,.6,.6],[78,-4,.6,.6]];
+ [-39.5,-1,2.8,1.8],[-35,-1,2.8,1.8],[-30.5,-1,2.8,1.8],[-35,-8,34.6,4],[62,-23,50,8],[55,-15.5,2.6,2.6],[69,-15.5,2.6,2.6],[58.6,-11,1,.6],
+ [6,-13,.6,.6],[-7,-12,.6,.6],[11,-24,.6,.6],[-14,-24,.6,.6],[28,-24,.6,.6],[-52,-24,.6,.6],[52,12,.6,.6],[-46,-9,.6,.6],[-22,9,.6,.6],[22,-12,.6,.6],[-60,6,.6,.6],[78,-4,.6,.6],[43,9.5,.6,.6],
+ [301.9,.5,1.5,.9],[303.8,1.7,.9,2.2],[303.5,-2.4,1.2,.4],[300,-3.25,1.1,.45],
+ [296,93,1.3,1.3],[296,97,1.3,1.3],[296,101,1.3,1.3],[296,105,1.3,1.3],[296,109,1.3,1.3],[304,93,1.3,1.3],[304,97,1.3,1.3],[304,101,1.3,1.3],[304,105,1.3,1.3],[304,109,1.3,1.3],
+ [300,90.4,7,3.6],[300,93.6,1.7,.9],[297.2,94.2,.6,.6],[302.8,94.2,.6,.6],
+ [298.8,197,5.2,.8],[304.3,198.2,1,3.4],[297.4,199.9,1.1,1.1],[300.6,201.2,1.1,1.1],[302.6,199.2,1.1,1.1],
+ [200,193,1.1,2.4],[201.2,195.6,.7,.5],[198.7,203.8,.5,.5],[201.3,203.8,.5,.5]];
 function collide(p){
   const r=.35;
   for(const c of COL){const hx=c[2]/2+r,hz=c[3]/2+r,dx=p.x-c[0],dz=p.z-c[1];
     if(Math.abs(dx)<hx&&Math.abs(dz)<hz){const ox=hx-Math.abs(dx),oz=hz-Math.abs(dz);if(ox<oz)p.x=c[0]+(dx<0?-1:1)*hx;else p.z=c[1]+(dz<0?-1:1)*hz}}
-  if(baby){if(p.z>3.6&&Math.abs(p.x)<1.4)gateT=2.2;p.x=clampN(p.x,-4.3,4.3);p.z=clampN(p.z,-5,3.6)}
+  const rm=ROOMS[locName];
+  if(rm){p.x=clampN(p.x,rm.b[0],rm.b[1]);p.z=clampN(p.z,rm.b[2],rm.b[3])}
+  else if(baby){if(p.z>3.6&&Math.abs(p.x)<1.4)gateT=2.2;p.x=clampN(p.x,-4.3,4.3);p.z=clampN(p.z,-5,3.6)}
   else{p.x=clampN(p.x,-85,95);p.z=clampN(p.z,-29.5,95)}
 }
 function zoneAt(x,z){
+  if(x>250)return z<50?"house":z<150?"hall":"beer";
   if(x>150)return"tomb";
   if(Math.abs(x)<4.8&&z>-5.6&&z<4.1)return"home";
   if(Math.hypot(x-40,z-5)<14)return"temple";
@@ -321,7 +444,7 @@ function zoneAt(x,z){
   if(z>45)return"desert";
   return"town";
 }
-function target(name){const l=LOC[name],d=Math.hypot(l.t[0]-l.p[0],l.t[2]-l.p[1]);return{x:l.p[0],z:l.p[1],yaw:yawTo(l.p[0],l.p[1],l.t[0],l.t[2]),pitch:Math.atan2(l.t[1]-camH,d)*.6}}
+function target(name){const rm=ROOMS[locName],l=rm&&rm.stage&&rm.menu===name?rm.stage:LOC[name],d=Math.hypot(l.t[0]-l.p[0],l.t[2]-l.p[1]);return{x:l.p[0],z:l.p[1],yaw:yawTo(l.p[0],l.p[1],l.t[0],l.t[2]),pitch:Math.atan2(l.t[1]-camH,d)*.6}}
 
 /* ---- hands + props ---- */
 const skinM=M("#9a6440");
@@ -350,6 +473,7 @@ const papyrus=new T.Group();box(0.5,0.004,0.34,"#e9dcb0",0,0,0,papyrus);for(let 
 papyrus.position.set(0,-0.36,-0.55);papyrus.rotation.x=1.15;papyrus.visible=false;camera.add(papyrus);
 const board=new T.Group();box(0.44,0.04,0.15,"#8a5d36",0,0,0,board);for(let i=0;i<10;i++){box(0.035,0.012,0.035,i%2?"#efe3c8":"#3a2a1e",-0.18+i*0.04,-0.03,0.04,board);box(0.035,0.012,0.035,i%2?"#3a2a1e":"#efe3c8",-0.18+i*0.04,0.03,0.04,board)}
 board.position.set(0,-0.4,-0.58);board.rotation.x=0.95;board.visible=false;camera.add(board);
+[HL,HR,papyrus,board].forEach(o=>o.traverse(c=>{c.castShadow=false;c.receiveShadow=false}));
 
 /* ---- actors ---- */
 const ghostMat=new T.MeshLambertMaterial({color:"#a9d8ff",emissive:"#36608f",transparent:true,opacity:0.45,flatShading:true});
@@ -375,6 +499,7 @@ function personMesh(o){
     else if(o.kind!=="priest"&&o.kind!=="baby"){const wc=c(o.old?"#bdb6aa":"#161210");ball(0.18,wc,0,0.03,-0.07,head,1,0.95,1.05);if(o.sex==="f")box(0.36,0.42,0.1,wc,0,-0.12,-0.41,head)}
   }
   g.userData.armL=armL;g.userData.armR=armR;g.userData.focus=1.6;
+  g.traverse(c=>{if(c.isMesh){c.castShadow=false;c.receiveShadow=false}});for(let i=0;i<4;i++)if(g.children[i]&&g.children[i].isMesh)g.children[i].castShadow=!gm;
   g.scale.setScalar(o.scale||1);return g}
 function animal(kind){
   const g=new T.Group();g.userData.kind=kind;
@@ -460,39 +585,60 @@ const G={
 const DEF_PROP={write:"pen",eat:"bread",drink:"cup",give:"coin",smash:"pot",carry:"jar",fish:"rod",torch:"torch",throw:"fig",offer:"bread",touchface:"kohl"};
 
 /* ---- people who live in the world ---- */
-const NPCS=new Map();let npcSig="";
-const SLOTS={home:[[-2.6,.6],[2.4,-.8],[-1.6,-3.2],[1.9,2.6],[-3.4,2.6],[3.2,1.2],[0,-3.4],[-2.9,-1.6]],
+const NPCS=new Map();let npcSig="",npcList=[],npcNight=false;
+const SLOTS={yard:[[-2.6,.6],[2.4,-.8],[-2.9,-3.3],[1.9,2.6],[-3.4,2.6],[3.2,1.2]],
+ house:[[297.3,1.2],[302.6,-1.4],[298.8,-0.8],[301.2,2.1],[296.9,2.3],[303.1,0.2],[299.3,-2.2]],
  market:[[-38,3.2],[-32.6,4.6],[-30.5,2.8],[-37.8,8.2],[-41,5.6],[-28.5,5.2],[-33,9.5]],
+ beer:[[297.3,201.4],[302.9,201.9],[299,198.6],[303,200.3],[296.5,198.6]],
  river:[[3.5,-24.6],[-4.5,-25],[8,-24.4]]};
-const DECOR=[];
-[[-39.5,-2.7,"m"],[-35,-2.7,"f"],[-30.5,-2.7,"m"]].forEach(([x,z,s],i)=>{const m=personMesh({type:"person",sex:s,old:i===1});m.position.set(x,0,z);scene.add(m);DECOR.push(m)});
-{const m=personMesh({type:"person",sex:"m",kind:"priest"});m.position.set(40,0,1.2);scene.add(m);DECOR.push(m)}
-{const m=personMesh({type:"person",sex:"m"});m.position.set(-11,0,-26);m.rotation.y=Math.PI;scene.add(m);DECOR.push(m)}
-function setNPCs(list){
-  const sig=JSON.stringify(list);if(sig===npcSig)return;npcSig=sig;
-  NPCS.forEach(n=>scene.remove(n.m));NPCS.clear();const cnt={};
-  list.forEach(n=>{const sl=SLOTS[n.place]||SLOTS.home,i=cnt[n.place]||0;cnt[n.place]=i+1;const s=sl[i%sl.length],k=Math.floor(i/sl.length);
+const AREA_G={yard:worldG,market:worldG,river:worldG,house:ROOMG.house,beer:ROOMG.beer};
+function layout(){
+  NPCS.forEach(n=>{n.m.parent&&n.m.parent.remove(n.m)});NPCS.clear();const cnt={},per={};
+  npcList.forEach(n=>{const j=per[n.place]||0;per[n.place]=j+1;
+    const area=n.place==="home"?((npcNight||j%2===1)?"house":"yard"):n.place==="market"?(npcNight?"beer":"market"):"river";
+    const sl=SLOTS[area],i=cnt[area]||0;cnt[area]=i+1;const s=sl[i%sl.length],k=Math.floor(i/sl.length);
     const cat=n.spec.type==="cat";const m=cat?animal("cat"):personMesh(n.spec);
-    m.position.set(s[0]+k*.9,0,s[1]+k*.7);m.rotation.y=i*1.7;scene.add(m);
+    m.position.set(s[0]+k*.8,0,s[1]+k*.6);m.rotation.y=i*1.7;AREA_G[area].add(m);
     NPCS.set(n.id,{m,id:n.id,label:n.label,cat,ph:i*1.3})});
 }
-function showNPCs(){NPCS.forEach(n=>{n.m.visible=true});DECOR.forEach(m=>{m.visible=true})}
+function setNPCs(list){const sig=JSON.stringify(list);if(sig===npcSig)return;npcSig=sig;npcList=list;layout()}
+// townsfolk: stall keepers, a priest, a fisherman, farmers, and the beer house crowd
+const DECOR=[];
+function decor(spec,x,z,ry,day,g){const m=personMesh(spec);m.position.set(x,0,z);m.rotation.y=ry||0;(g||worldG).add(m);DECOR.push({m,day:!!day,hid:false});return m}
+decor({type:"person",sex:"m"},-39.5,-2.7,0,true);decor({type:"person",sex:"f",old:true},-35,-2.7,0,true);decor({type:"person",sex:"m"},-30.5,-2.7,0,true);
+decor({type:"person",sex:"m",kind:"priest"},42.2,3.4,0,false);decor({type:"person",sex:"m"},-11,-26,Math.PI,true);
+decor({type:"person",sex:"m"},-27,-17.2,1,true);decor({type:"person",sex:"f"},-34,-21.1,-1,true);
+decor({type:"person",sex:"m",kind:"priest"},302.6,96.5,-0.6,false,ROOMG.hall);
+decor({type:"person",sex:"m",old:true},298.8,196.4,0,false,ROOMG.beer);decor({type:"person",sex:"m"},297.4,200.9,2.6,false,ROOMG.beer);decor({type:"person",sex:"f"},301.5,201.7,-2.2,false,ROOMG.beer);
+// people walking their daily routes through town
+const PATHS=[[[-28,8],[-10,10],[10,10],[30,12],[40,10]],[[-24,6],[-16,2],[-12,-10],[-10,-22]],[[44,12],[54,6],[60,-2],[62,-8]],[[8,8],[-8,9],[-20,7],[-30,6]],[[-16,4],[-15,-12],[-19,-18]]];
+const WALK=[];
+[[0,0,"m"],[0,.55,"f"],[1,.2,"f"],[2,.6,"m"],[3,.3,"f"],[4,.7,"m"],[3,.85,"m"]].forEach(([pi,u,s],i)=>{
+  const m=personMesh({type:"person",sex:s,old:i%3===2,scale:i===4?0.8:1});worldG.add(m);
+  WALK.push({m,path:PATHS[pi],u:u*(PATHS[pi].length-1),dir:i%2?1:-1,sp:1.1+((i*37)%5)*.12,ph:i*1.9,hid:false})});
+const GEESE=[[-24,-12.6],[-33,-12.2],[-18,-20]].map(([x,z],i)=>{const m=animal("goose");m.position.set(x,0,z);worldG.add(m);return{m,x,z,ph:i*2.3}});
+function showNPCs(){NPCS.forEach(n=>{n.m.visible=true});DECOR.forEach(d=>{d.hid=false});WALK.forEach(w=>{w.hid=false})}
 function hideNPCs(pid,pos){
-  NPCS.forEach(n=>{if(n.id===pid||Math.hypot(n.m.position.x-pos.x,n.m.position.z-pos.z)<1.6)n.m.visible=false});
-  DECOR.forEach(m=>{if(Math.hypot(m.position.x-pos.x,m.position.z-pos.z)<1.6)m.visible=false});
+  const near=m=>Math.hypot(m.position.x-pos.x,m.position.z-pos.z)<1.6;
+  NPCS.forEach(n=>{if(n.id===pid||near(n.m))n.m.visible=false});
+  DECOR.forEach(d=>{if(near(d.m))d.hid=true});WALK.forEach(w=>{if(near(w.m))w.hid=true});
 }
 
 /* ---- state ---- */
-let cine=null,trav=null,glide=null,tl=null,tod=0,todTarget=0,deadFade=0,proj=null,onInteract=null,onMap=null,curT=null,walkPh=0,moved=false;
+let cine=null,trav=null,glide=null,deadFade=0,proj=null,onInteract=null,onMap=null,curT=null,walkPh=0,moved=false;
+let dayT=0.12,chase=null,spin=0,nNow=0;      // dayT: 0 sunrise, .25 noon, .5 sunset, .75 midnight
+const TORCH_L=[-0.22,-0.26,-0.5,0.15,0,0];
 const curL=REST_L.slice(),curR=REST_R.slice();
 const now=()=>performance.now()/1000;
 const promptEl=document.getElementById("prompt"),joyEl=document.getElementById("joy"),knob=joyEl.firstElementChild,mapEl=document.getElementById("mini"),mctx=mapEl.getContext("2d"),hintEl=document.getElementById("vhint");
 const veilEl=document.getElementById("veil"),startEl=document.getElementById("start"),hallEl=document.getElementById("hall");
 function caption(t){if(t){capEl.textContent=t;capEl.classList.add("on")}else capEl.classList.remove("on")}
 function setZone(){const z=zoneAt(PL.x,PL.z);if(z!==locName){locName=z;loc=LOC[z];locEl.textContent=loc.name}}
+// a night scene pulls the clock forward to night; a day scene at night pulls it to morning
+function setTime(night){if(night){if(nNow<0.8)chase=0.77}else if(nNow>0.35)chase=0.14}
 function moveTo(name,spec,night){
-  todTarget=night?1:0;
-  if(!name||!LOC[name]||name==="town"){spawn(spec,PL);return .15}
+  setTime(!!night);
+  if(!name||!LOC[name]||!LOC[name].p||name==="town"){spawn(spec,PL);return .15}
   const tg=target(name),d=Math.hypot(tg.x-PL.x,tg.z-PL.z);
   if(d<9){let dy=tg.yaw-PL.yaw;dy=Math.atan2(Math.sin(dy),Math.cos(dy));glide={x0:PL.x,z0:PL.z,y0:PL.yaw,p0:PL.pitch,to:tg,dy,t0:now()};trav=null;spawn(spec,tg);return .5}
   glide=null;trav={to:tg,spec,t0:now(),snapped:false};return .6;
@@ -512,10 +658,11 @@ function play(cue,res){
 function endCine(){
   const c=cine;cine=null;caption("");
   Object.values(P).forEach(p=>{p.visible=false});papyrus.visible=false;board.visible=false;
-  if(!c.death){spawn(null);todTarget=0;if(PL.x>150)trav={to:target("necro"),spec:null,t0:now(),snapped:false}}
+  if(!c.death)spawn(null);
   c.done();
 }
-function travel(name){if(cine||trav||!LOC[name])return;todTarget=0;glide=null;spawn(null);trav={to:target(name),spec:null,t0:now(),snapped:false}}
+function travel(name){if(cine||trav||!LOC[name]||!LOC[name].p)return;glide=null;spawn(null);trav={to:target(name),spec:null,t0:now(),snapped:false}}
+function useDoor(d){if(cine||trav)return;glide=null;spawn(null);trav={to:{x:d.to[0],z:d.to[1],yaw:d.to[2],pitch:0},spec:null,t0:now(),snapped:false}}
 
 /* ---- controls: stick to walk and turn, drag to look, keys on a computer ---- */
 const joy={x:0,y:0,id:null},keys={};
@@ -531,19 +678,20 @@ const endDrag=e=>{if(drag&&drag.id===e.pointerId)drag=null};cv.addEventListener(
 window.addEventListener("keydown",e=>{if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;const k=e.key.toLowerCase();keys[k]=true;if(k==="e"&&!promptEl.hidden&&veilEl.hidden){promptEl.click();e.preventDefault()}});
 window.addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=false});
 window.addEventListener("blur",()=>{for(const k in keys)keys[k]=false});
-promptEl.onclick=()=>{if(curT&&onInteract&&!cine&&!trav)onInteract(curT)};
+promptEl.onclick=()=>{if(!curT||cine||trav)return;if(curT.type==="door")useDoor(curT.d);else if(onInteract)onInteract(curT)};
 mapEl.onclick=()=>{if(onMap&&!cine&&!trav)onMap()};
 
 /* ---- mini map ---- */
 function drawMap(){
   const w=mapEl.width,h=mapEl.height,X=x=>(x+85)/180*w,Z=z=>(z+34)/130*h;
-  mctx.fillStyle="#cdaa6e";mctx.fillRect(0,0,w,h);
+  mctx.fillStyle=nNow>0.5?"#6f6a78":"#cdaa6e";mctx.fillRect(0,0,w,h);
   mctx.fillStyle="#2c7a86";mctx.fillRect(0,0,w,Z(-27));
   mctx.fillStyle="#6e9a3c";mctx.fillRect(X(-39),Z(-25),X(-21)-X(-39),Z(-14)-Z(-25));
+  const here=ROOMS[locName]?{house:"home",hall:"temple",beer:"market",tomb:"necro"}[locName]:locName;
   [["home",0,-1,"#fff3c4"],["temple",40,2,"#d9a93f"],["market",-35,1,"#b8452f"],["necro",62,-16,"#7a4a2a"],["desert",0,70,"#f0dcae"]].forEach(([k,x,z,c])=>{
-    mctx.fillStyle=c;mctx.strokeStyle="#1b1408";mctx.lineWidth=2;mctx.beginPath();mctx.arc(X(x),Z(z),k===locName?9:6,0,7);mctx.fill();mctx.stroke()});
-  const inT=PL.x>150;
-  mctx.save();mctx.translate(X(inT?62:PL.x),Z(inT?-18:PL.z));mctx.rotate(-PL.yaw);
+    mctx.fillStyle=c;mctx.strokeStyle="#1b1408";mctx.lineWidth=2;mctx.beginPath();mctx.arc(X(x),Z(z),k===here?9:6,0,7);mctx.fill();mctx.stroke()});
+  const rm=ROOMS[locName],mx=rm?rm.out[0]:PL.x,mz=rm?rm.out[1]:PL.z;
+  mctx.save();mctx.translate(X(mx),Z(mz));mctx.rotate(-PL.yaw);
   mctx.fillStyle="#0d1328";mctx.strokeStyle="#fff";mctx.lineWidth=2;mctx.beginPath();mctx.moveTo(0,-11);mctx.lineTo(7,8);mctx.lineTo(-7,8);mctx.closePath();mctx.fill();mctx.stroke();mctx.restore();
 }
 
@@ -552,14 +700,15 @@ function resize(){const w=view.clientWidth,h=view.clientHeight;if(!w||!h)return;
 if(window.ResizeObserver)new ResizeObserver(resize).observe(view);window.addEventListener("resize",resize);resize();
 
 /* ---- loop ---- */
-const C_TOP_D=new T.Color("#6aa6cf"),C_TOP_N=new T.Color("#070b22"),C_BOT_D=new T.Color("#f3cf9a"),C_BOT_N=new T.Color("#1c2350"),C_SUNSET=new T.Color("#e07a3a"),C_TMP=new T.Color(),C_TMP2=new T.Color();
-let last=now(),clock=0,uiT=0;
+const C_TOP_D=new T.Color("#5f9fd0"),C_TOP_N=new T.Color("#060a20"),C_BOT_D=new T.Color("#f3d3a0"),C_BOT_N=new T.Color("#1a2150"),C_SUNSET=new T.Color("#ee7a35"),C_TMP=new T.Color(),C_TMP2=new T.Color();
+const C_SUN_D=new T.Color(0xffe6c0),C_SUN_W=new T.Color(0xff9a4f),C_WIN_D=new T.Color("#2a1d14"),C_WIN_N=new T.Color("#ffbf66"),C_WAT_D=new T.Color("#2c7a86"),C_WAT_N=new T.Color("#0d2536"),C_IN=new T.Color("#120c08");
+let last=now(),clock=0,uiT=0,lastX=PL.x,lastZ=PL.z;
 function loop(){
   const tN=now(),dt=Math.min(0.05,tN-last);last=tN;clock+=dt;
-  // travelling: fade cut for far places, short glide for near ones
+  // travelling: fade cut for far places and doors, short glide for near ones
   let fadeTravel=0;
   if(trav){const k=(tN-trav.t0)/0.6;
-    if(!trav.snapped&&k>=0.5){PL.x=trav.to.x;PL.z=trav.to.z;PL.yaw=trav.to.yaw;PL.pitch=trav.to.pitch;trav.snapped=true;setZone();spawn(trav.spec,PL)}
+    if(!trav.snapped&&k>=0.5){PL.x=trav.to.x;PL.z=trav.to.z;PL.yaw=trav.to.yaw;PL.pitch=trav.to.pitch;trav.snapped=true;lastX=PL.x;lastZ=PL.z;setZone();spawn(trav.spec,PL)}
     fadeTravel=k<0.5?k*2:Math.max(0,2-k*2);if(k>=1)trav=null}
   if(glide){const k=Math.min(1,(tN-glide.t0)/0.45),s=sm(k),g=glide;PL.x=g.x0+(g.to.x-g.x0)*s;PL.z=g.z0+(g.to.z-g.z0)*s;PL.yaw=g.y0+g.dy*s;PL.pitch=g.p0+(g.to.pitch-g.p0)*s;if(k>=1)glide=null}
   // walking
@@ -569,31 +718,53 @@ function loop(){
     const turn=joy.x+(keys.arrowright?1:0)-(keys.arrowleft?1:0);
     let f=joy.y+((keys.w||keys.arrowup)?1:0)-((keys.s||keys.arrowdown)?1:0);const st=(keys.d?1:0)-(keys.a?1:0);
     if(Math.abs(turn)>0.12)PL.yaw-=turn*2.1*dt;
-    if(Math.abs(f)>0.12||st){f=clampN(f,-1,1);const sp=walkSpeed*(f<0?0.6:1),s=Math.sin(PL.yaw),c=Math.cos(PL.yaw);
+    if(Math.abs(f)>0.12||st){f=clampN(f,-1,1);const sp=walkSpeed*(f<0?0.6:1)*(loc.indoor?0.75:1),s=Math.sin(PL.yaw),c=Math.cos(PL.yaw);
       PL.x+=(-s*f+c*st)*sp*dt;PL.z+=(-c*f-s*st)*sp*dt;collide(PL);moving=true;walkPh+=dt*(baby?5:9);PL.pitch*=1-Math.min(1,dt*0.8);
       if(!moved){moved=true;hintEl.hidden=true}}
   }
   if(gateT>0){if(gateT===2.2&&!cine)caption("You're too little to leave the courtyard");gateT-=dt;if(gateT<=0){gateT=0;if(!cine)caption("")}}
-  // what's near me
+  // what's near me: a person, a door, or the place itself
   uiT-=dt;
   if(uiT<=0){uiT=0.15;setZone();
     let t=null;
     if(!cine&&!trav&&!glide&&!ui&&deadFade===0){let bd=2.8;
-      NPCS.forEach(n=>{if(!n.m.visible)return;const d=Math.hypot(n.m.position.x-PL.x,n.m.position.z-PL.z);if(d<bd){bd=d;t={type:"npc",id:n.id,label:n.label}}});
-      if(!t&&locName!=="town"&&locName!=="tomb")t={type:"place",key:locName,label:loc.name}}
-    const key=t?t.type+(t.id||t.key):"",old=curT?curT.type+(curT.id||curT.key):"";
-    if(key!==old){curT=t;if(t){promptEl.textContent=(t.type==="npc"?"Talk · ":"Explore · ")+t.label;promptEl.hidden=false}else promptEl.hidden=true}
+      NPCS.forEach(n=>{if(!n.m.visible||!n.m.parent||!n.m.parent.visible)return;const d=Math.hypot(n.m.position.x-PL.x,n.m.position.z-PL.z);if(d<bd){bd=d;t={type:"npc",id:n.id,label:n.label,text:"Talk · "+n.label}}});
+      if(!loc.indoor)WALK.forEach((w,i)=>{if(!w.m.visible)return;const d=Math.hypot(w.m.position.x-PL.x,w.m.position.z-PL.z);if(d<Math.min(bd,2.4)){bd=d;t={type:"stranger",id:"w"+i,label:"Townsperson",text:"Talk · Townsperson"}}});
+      DOORS.forEach((d,i)=>{const dd=Math.hypot(d.x-PL.x,d.z-PL.z);if(dd<d.r&&dd<bd){bd=dd;t={type:"door",id:"d"+i,d,text:d.label}}});
+      if(!t&&locName!=="town"){const rm=ROOMS[locName];t={type:"place",key:(rm&&rm.menu)||locName,id:locName,only:rm&&rm.only,label:loc.name,text:"Explore · "+loc.name}}}
+    const key=t?t.type+t.id:"",old=curT?curT.type+curT.id:"";
+    if(key!==old){curT=t;if(t){promptEl.textContent=t.text;promptEl.hidden=false}else promptEl.hidden=true}
     drawMap()}
-  // time of day
-  tod+=(todTarget-tod)*Math.min(1,dt*2.5);
-  let todE=tod;if(tl){const k=(tN-tl)/1.3;if(k>=1)tl=null;else todE=Math.max(tod,Math.sin(k*Math.PI))}
-  const dark=!!loc.dark;
-  C_TMP.copy(C_TOP_D).lerp(C_TOP_N,todE);skyU.top.value.copy(C_TMP);
-  C_TMP2.copy(C_BOT_D).lerp(C_BOT_N,todE);if(todE>0.15&&todE<0.85)C_TMP2.lerp(C_SUNSET,0.35*Math.sin((todE-0.15)/0.7*Math.PI));
-  skyU.bot.value.copy(C_TMP2);
-  if(dark){scene.fog.color.set("#000000");scene.fog.near=1;scene.fog.far=16;hemi.intensity=0.05;sun.intensity=0;moon.intensity=0;torchLight.intensity=1.5+0.25*Math.sin(clock*17)+0.15*Math.sin(clock*29)}
-  else{scene.fog.color.copy(C_TMP2);scene.fog.near=70;scene.fog.far=480;hemi.intensity=0.85-0.68*todE;sun.intensity=0.95*(1-todE);moon.intensity=0.4*todE;torchLight.intensity=(cine&&cine.prop==="torch")?1.2:0}
-  starMat.opacity=dark?0:todE;
+  // the clock: one day takes about five minutes
+  if(chase!==null){const diff=((chase-dayT)%1+1)%1;if(diff<0.004)chase=null;else dayT+=Math.min(diff,dt*0.9)}
+  else if(spin>0){const s=Math.min(spin,dt/1.3);dayT+=s;spin-=s}
+  else if(!ui)dayT+=dt/300;
+  dayT%=1;
+  const ang=dayT*6.2832,el=Math.sin(ang),dayF=sm(clampN((el+0.12)/0.3,0,1));nNow=1-dayF;
+  const warm=el>-0.2?clampN(1-Math.abs(el)/0.4,0,1):0;
+  const night=npcNight?nNow>0.45:nNow>0.65;if(night!==npcNight&&!cine&&!trav){npcNight=night;layout()}
+  const indoor=!!loc.indoor,dark=!!loc.dark;
+  worldG.visible=!indoor;for(const k in ROOMG)ROOMG[k].visible=locName===k;
+  C_TMP.copy(C_TOP_D).lerp(C_TOP_N,nNow);skyU.top.value.copy(C_TMP);
+  C_TMP2.copy(C_BOT_D).lerp(C_BOT_N,nNow).lerp(C_SUNSET,warm*0.55);skyU.bot.value.copy(C_TMP2);
+  skyMat.color.copy(C_TMP2);winMat.color.copy(C_WIN_D).lerp(C_WIN_N,nNow);water.material.color.copy(C_WAT_D).lerp(C_WAT_N,nNow);
+  sun.color.copy(C_SUN_D).lerp(C_SUN_W,warm);
+  if(indoor){scene.fog.color.copy(dark?C_TMP.set("#000000"):C_IN);scene.fog.near=dark?1:6;scene.fog.far=dark?16:48;hemi.intensity=dark?0.05:0.2+0.12*dayF;sun.intensity=0;moon.intensity=0;
+    torchLight.intensity=dark?1.5+0.25*Math.sin(clock*17)+0.15*Math.sin(clock*29):0}
+  else{scene.fog.color.copy(C_TMP2);scene.fog.near=70-30*nNow;scene.fog.far=480-150*nNow;hemi.intensity=0.78-0.6*nNow;sun.intensity=1.05*dayF;moon.intensity=0.42*nNow;torchLight.intensity=(cine&&cine.prop==="torch")?1.2:0}
+  sun.castShadow=!indoor&&dayF>0.03;
+  starMat.opacity=indoor?0:nNow;
+  const sx=Math.cos(ang),sy=Math.max(el,0.12);
+  sun.position.set(PL.x+sx*75,sy*95,PL.z+38);sun.target.position.set(PL.x,0,PL.z);
+  moon.position.set(PL.x-sx*60,60,PL.z-30);
+  sunDisc.visible=!indoor&&el>-0.12;moonDisc.visible=!indoor&&el<0.12;
+  const lampOn=sm(clampN((nNow-0.25)/0.4,0,1));
+  for(const L of LAMPS){const fl=1+0.16*Math.sin(clock*13+L.ph)+0.1*Math.sin(clock*23+L.ph*2),on=L.always?1:lampOn;L.l.intensity=on*L.k*fl;L.f.visible=on>0.05;L.f.scale.y=0.85+0.3*fl}
+  // dust in the air drifts on the wind and stays around you
+  {const dx=PL.x-lastX,dz=PL.z-lastZ;lastX=PL.x;lastZ=PL.z;const wind=locName==="desert"?2.4:indoor?0.05:0.35;
+    for(let i=0;i<DN;i++){let x=dustA[i*3]+wind*dt-dx,y=dustA[i*3+1]+Math.sin(clock*0.7+i)*0.004,z=dustA[i*3+2]+wind*0.3*dt-dz;
+      if(x>15)x-=30;else if(x<-15)x+=30;if(z>15)z-=30;else if(z<-15)z+=30;dustA[i*3]=x;dustA[i*3+1]=y;dustA[i*3+2]=z}
+    dustG.attributes.position.needsUpdate=true;dust.position.set(PL.x,0,PL.z);dustMat.opacity=locName==="desert"?0.85:indoor?0.4:0.5-0.3*nNow;dustMat.size=locName==="desert"?0.1:0.07}
   // water
   for(let i=0;i<wp.count;i++){const x=wbase[i*3],y=wbase[i*3+1];wp.array[i*3+2]=Math.sin(x*0.3+clock*1.2)*0.06+Math.cos(y*0.5+clock)*0.05}
   wp.needsUpdate=true;
@@ -601,14 +772,15 @@ function loop(){
   let out={},t=0,e=0;
   if(cine&&tN>=cine.t0){t=Math.min(1,(tN-cine.t0)/cine.dur);e=cine.death?Math.min(1,t/0.18):env(t);out=G[cine.g](t,e)||{};
     if(cine.prop&&P[cine.prop])P[cine.prop].visible=!out.drop&&e>0.05;
+    if(cine.prop!=="torch")P.torch.visible=false;
     papyrus.visible=!!out.papyrus;board.visible=!!out.board;
     if(out.launch&&!cine.launched){cine.launched=true;const m=new T.Mesh(new T.SphereGeometry(0.05,6,4),M("#5a2a4a"));HR.getWorldPosition(m.position);const v=new T.Vector3();camera.getWorldDirection(v);proj={m,v:v.multiplyScalar(9).add(new T.Vector3(0,3,0)),t:0};scene.add(m)}
     if(t>=1&&!cine.ending){cine.ending=true;setTimeout(endCine,cine.death?50:250)}
-  }
+  } else if(!cine)P.torch.visible=dark;       // you carry a torch in the tomb
   if(proj){proj.t+=dt;proj.v.y-=12*dt;proj.m.position.addScaledVector(proj.v,dt);if(proj.t>1.4){scene.remove(proj.m);proj=null}}
   const cam=out.cam||{};
   // hands
-  const tl_=out.L||REST_L,tr_=out.R||REST_R,hk=Math.min(1,dt*16);
+  const tl_=out.L||(dark&&!cine?TORCH_L:REST_L),tr_=out.R||REST_R,hk=Math.min(1,dt*16);
   for(let i=0;i<6;i++){curL[i]+=(tl_[i]-curL[i])*hk;curR[i]+=(tr_[i]-curR[i])*hk}
   [[HL,curL],[HR,curR]].forEach(([h,a])=>{h.position.set(a[0],a[1],a[2]);h.rotation.set(a[3],a[4],a[5]);h.scale.setScalar(handScale)});
   // whoever the scene is about
@@ -640,7 +812,20 @@ function loop(){
   const face=(m,ph,cat)=>{if(!m.visible)return;const dx=PL.x-m.position.x,dz=PL.z-m.position.z;
     if(dx*dx+dz*dz<49){let dy=Math.atan2(dx,dz)-m.rotation.y;dy=Math.atan2(Math.sin(dy),Math.cos(dy));m.rotation.y+=dy*Math.min(1,dt*3)}
     const u=m.userData;if(cat){u.tail.rotation.y=Math.sin(clock*3+ph)*0.6}else if(u.armL){u.armL.rotation.x=Math.sin(clock*1.3+ph)*0.05;u.armR.rotation.x=-Math.sin(clock*1.3+ph)*0.05;u.head.rotation.y=Math.sin(clock*0.6+ph)*0.15}};
-  NPCS.forEach(n=>face(n.m,n.ph,n.cat));DECOR.forEach((m,i)=>face(m,i*2.1,false));
+  NPCS.forEach(n=>face(n.m,n.ph,n.cat));
+  DECOR.forEach((d,i)=>{d.m.visible=!d.hid&&!(d.day&&npcNight);face(d.m,i*2.1,false)});
+  if(!indoor){
+    for(const w of WALK){const m=w.m;m.visible=!w.hid&&!npcNight;if(!m.visible)continue;
+      const dxp=PL.x-m.position.x,dzp=PL.z-m.position.z,close=dxp*dxp+dzp*dzp<6.5,u=m.userData;
+      if(close){let dy=Math.atan2(dxp,dzp)-m.rotation.y;dy=Math.atan2(Math.sin(dy),Math.cos(dy));m.rotation.y+=dy*Math.min(1,dt*4);u.armL.rotation.x*=0.9;u.armR.rotation.x*=0.9;continue}
+      const n=w.path.length-1;let i=Math.min(n-1,Math.floor(w.u));const a=w.path[i],b=w.path[i+1],len=Math.hypot(b[0]-a[0],b[1]-a[1]);
+      w.u+=w.dir*w.sp*dt/len;if(w.u>=n){w.u=n;w.dir=-1}else if(w.u<=0){w.u=0;w.dir=1}
+      i=Math.min(n-1,Math.floor(w.u));const p=w.path[i],q=w.path[i+1],fr=w.u-i;
+      m.position.set(p[0]+(q[0]-p[0])*fr,Math.abs(Math.sin(clock*6+w.ph))*0.03,p[1]+(q[1]-p[1])*fr);
+      let dy=Math.atan2((q[0]-p[0])*w.dir,(q[1]-p[1])*w.dir)-m.rotation.y;dy=Math.atan2(Math.sin(dy),Math.cos(dy));m.rotation.y+=dy*Math.min(1,dt*5);
+      const sw=Math.sin(clock*6+w.ph)*0.5;u.armL.rotation.x=sw;u.armR.rotation.x=-sw}
+    for(const g of GEESE){g.m.position.x=g.x+Math.sin(clock*0.25+g.ph)*1.6;g.m.position.z=g.z+Math.cos(clock*0.19+g.ph)*1.1;g.m.rotation.y=Math.atan2(Math.cos(clock*0.25+g.ph),-Math.sin(clock*0.19+g.ph));g.m.userData.head.rotation.x=Math.max(0,Math.sin(clock*1.3+g.ph))*0.9}
+  }
   // camera = your eyes
   const d=fwd();
   let cx=PL.x+d.x*(cam.fwd||0),cz=PL.z+d.z*(cam.fwd||0);
@@ -648,6 +833,7 @@ function loop(){
   if(cine&&cine.death&&t>0.55){const k=sm(Math.min(1,(t-0.55)/0.35));cy-=(camH-0.15)*k}
   if(cam.shake){cx+=(Math.random()-.5)*cam.shake;cy+=(Math.random()-.5)*cam.shake}
   camera.position.set(cx,cy,cz);sky.position.copy(camera.position);stars.position.copy(camera.position);
+  sunDisc.position.set(cx+sx*700,el*520+40,cz+250);moonDisc.position.set(cx-sx*640,-el*480+60,cz-260);
   if(actor&&!trav&&!glide){const ax=actor.position.x-PL.x,az=actor.position.z-PL.z;let ty=Math.max(0.05,actor.position.y)+actor.userData.focus*0.85;if(ty<camH)ty=camH-(camH-ty)*0.8;
     PL.pitch+=(Math.atan2(ty-camH,Math.hypot(ax,az))-PL.pitch)*Math.min(1,dt*4)}
   let roll=cam.roll||0;if(cine&&cine.death&&t>0.5)roll+=1.2*sm(Math.min(1,(t-0.5)/0.4));
@@ -665,8 +851,8 @@ return{
   play,shot,setNPCs,travel,
   on(i,m){onInteract=i;onMap=m},
   setAge(a){camH=a<2?0.42:a<4?0.6:a<13?0.85+(a-4)*0.06:a<18?1.45:1.62;handScale=a<4?0.55:a<13?0.78:1;walkSpeed=a<2?1.1:a<4?1.7:a<13?3.8:a<60?5.2:3.6;baby=a<4},
-  age(a){tl=now();caption("Age "+a);setTimeout(()=>{if(!cine)caption("")},1300)},
-  reset(){deadFade=0;todTarget=0;tod=0;cine=null;trav=null;glide=null;caption("");spawn(null);PL.x=0;PL.z=2.2;PL.yaw=0;PL.pitch=0;locName="";setZone()}
+  age(a){spin+=1;caption("Age "+a);setTimeout(()=>{if(!cine)caption("")},1300)},
+  reset(){deadFade=0;dayT=0.12;chase=null;spin=0;cine=null;trav=null;glide=null;caption("");spawn(null);PL.x=0;PL.z=2.2;PL.yaw=0;PL.pitch=0;locName="";setZone()}
 };
 })();
 </script>
@@ -1335,25 +1521,27 @@ function personMenu(p,w){
 /* ---- walking up to places and people ---- */
 const PLACE_ODD={birds:"fields",water:"necro",onions:"market",geese:"temple"};
 const PLACE_NAMES={home:"Home",temple:"Temple of Amun",river:"The Nile",market:"The market",fields:"Barley fields",necro:"The necropolis",desert:"The desert"};
-function placeMenu(key){
-  const at=k=>k===key||(key==="necro"&&k==="tomb");
-  const list=ACTS.filter(a=>ACT_CUE[a.k]&&at(ACT_CUE[a.k][0])&&S.age>=(a.min??0)&&S.age<=(a.max??200)&&(!a.need||a.need()));
+function placeMenu(key,only,title,here){
+  const list=ACTS.filter(a=>(only?only.includes(a.k):ACT_CUE[a.k]&&ACT_CUE[a.k][0]===key)&&S.age>=(a.min??0)&&S.age<=(a.max??200)&&(!a.need||a.need()));
   const extra=[];
-  if(S.job&&at(JOB_LOC[S.job]))extra.push({k:"shift",label:"Work an extra shift",tag:"Earn deben",
+  if(!only&&S.job&&JOB_LOC[S.job]===key)extra.push({k:"shift",label:"Work an extra shift",tag:"Earn deben",
     run:()=>r(pick(["You work until the sun goes down. Your boss almost notices.","An extra shift. Your back files a complaint with Ma'at.","You stay late. The others go home. You get paid, they get dinner."]),{deben:R(3,8),health:-2}),
     cue:{loc:JOB_LOC[S.job],g:S.job==="scribe"?"write":S.job==="priest"?"pray":"carry",label:"Extra shift"}});
-  if(!S.job)ODD.filter(o=>S.age>=o.min&&PLACE_ODD[o.k]===key).forEach(o=>extra.push({k:"odd",label:o.label,tag:o.pay[0]+"-"+o.pay[1]+" deben",
+  if(!only&&!S.job)ODD.filter(o=>S.age>=o.min&&PLACE_ODD[o.k]===key).forEach(o=>extra.push({k:"odd",label:o.label,tag:o.pay[0]+"-"+o.pay[1]+" deben",
     run:()=>r(o.line,{deben:R(o.pay[0],o.pay[1]),health:-1}),cue:{loc:key,g:o.k==="birds"?"flail":"carry",actor:actorFor(o.k==="birds"||o.k==="geese"?"goose":null),label:o.label}}));
   const dead=key==="necro"?S.people.filter(p=>!p.alive&&!p.left&&p.type!=="pet"):[];
-  openSheet(`<p class="kicker">You are here</p><h2>${PLACE_NAMES[key]||"Here"}</h2>
+  const hint=key==="necro"?"The dark doorway in the cliff leads into a tomb.":key==="market"&&!only?"The house with the red awning is the beer house.":"";
+  openSheet(`<p class="kicker">${here?"You stop them":"You are here"}</p><h2>${esc(title||PLACE_NAMES[key]||"Here")}</h2>
    <div class="choices">${list.map(a=>{const done=S.used[a.k],poor=a.cost&&S.deben<a.cost,owned=a.item&&S.items.includes(a.item);
      const tag=done?"Done this year":owned?"Owned":poor?`Need ${a.cost} deben`:a.cost?`${a.cost} deben`:a.sub||"";
      return `<button class="choice" data-k="${a.k}" ${done||poor||owned?"disabled":""}><span>${esc(a.label)}</span><small>${esc(tag)}</small></button>`}).join("")}
    ${extra.map((x,i)=>`<button class="choice" data-x="${i}" ${S.used[x.k]?"disabled":""}><span>${esc(x.label)}</span><small>${S.used[x.k]?"Done this year":esc(x.tag)}</small></button>`).join("")}
    ${dead.map(p=>`<button class="choice" data-d="${p.id}"><span>Visit ${esc(p.name)}'s tomb</span><small>${esc(p.rel)}</small></button>`).join("")}</div>
    ${!list.length&&!extra.length&&!dead.length?`<p class="note">There's nothing for you to do here at your age. Come back when you're older.</p>`:""}
+   ${hint?`<p class="note" style="margin-top:10px">${hint}</p>`:""}
    <button class="close" id="cl">Keep walking</button>`);
-  $("#sheet").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{const a=ACTS.find(x=>x.k===b.dataset.k);S.used[a.k]=1;if(a.item)S.items.push(a.item);resolve(a.run(),null,actCue(a))});
+  $("#sheet").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{const a=ACTS.find(x=>x.k===b.dataset.k);S.used[a.k]=1;if(a.item)S.items.push(a.item);
+    const cue=actCue(a);if(here){cue.loc=null;cue.night=false;if(!cue.actor)cue.actor=actorFor(pick(["man","woman"]))}resolve(a.run(),null,cue)});
   $("#sheet").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{const x=extra[+b.dataset.x];S.used[x.k]=1;resolve(x.run(),null,x.cue)});
   $("#sheet").querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>personMenu(S.people.find(p=>p.id==b.dataset.d),true));
 }
@@ -1364,7 +1552,9 @@ function travelMenu(){
   $("#sheet").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{closeSheet();W.travel(b.dataset.k)});
 }
 W.on(t=>{if(busy||pending||!S||!S.alive)return;
-  if(t.type==="npc"){const p=S.people.find(x=>x.id===t.id);if(p)personMenu(p,true)}else placeMenu(t.key)},
+  if(t.type==="npc"){const p=S.people.find(x=>x.id===t.id);if(p)personMenu(p,true)}
+  else if(t.type==="stranger")placeMenu("market",["friend","gossip","fight","pick","help"],"A townsperson",true);
+  else placeMenu(t.key,t.only,t.label)},
  ()=>{if(busy||pending||!S||!S.alive)return;travelMenu()});
 
 function menuLife(){
