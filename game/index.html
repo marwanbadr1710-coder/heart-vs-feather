@@ -77,7 +77,9 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .bar i{display:block;height:100%;width:50%;border-radius:4px;background:var(--faience);transition:width .5s ease,background .5s}
 .stat output{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-dim)}
 .stat.maat .bar i{background:var(--gold)}
-.curse{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-dim)}
+.curse{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-dim)}
+.stat.fame .bar i{background:var(--ember)}
+.ava,.who{cursor:pointer}
 .pips{display:flex;gap:4px}
 .pips span{width:13px;height:13px;border-radius:50%;border:1px solid rgba(217,87,59,.5)}
 .pips span.on{background:var(--carnelian);box-shadow:0 0 8px rgba(217,87,59,.7)}
@@ -149,7 +151,7 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 <div class="app" id="app">
   <header class="top">
     <div class="ava" id="ava" aria-hidden="true">𓀀</div>
-    <div class="who"><h1 id="name">—</h1><p id="meta">—</p><div class="traits" id="traits"></div></div>
+    <div class="who" id="who" role="button" aria-label="Your life"><h1 id="name">—</h1><p id="meta">—</p><div class="traits" id="traits"></div></div>
     <div class="purse"><b id="deben">0</b><span>deben</span></div>
   </header>
   <div class="view" id="view"><canvas id="cv" aria-label="First-person view of your life in Ancient Egypt"></canvas><div class="fade" id="fade"></div><div class="cap" id="cap"></div><div class="vlabel" id="locname">Home</div><div class="vhint" id="vhint">Stick to walk · drag to look</div><canvas class="mini" id="mini" width="184" height="132" role="button" aria-label="Open the map"></canvas><div class="joy" id="joy" aria-label="Walk"><i></i></div><button class="prompt" id="prompt" hidden></button></div>
@@ -160,14 +162,15 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
     <div class="stat" data-k="smarts"><label>Smarts</label><div class="bar"><i></i></div><output>0</output></div>
     <div class="stat" data-k="looks"><label>Looks</label><div class="bar"><i></i></div><output>0</output></div>
     <div class="stat maat" data-k="maat"><label>Ma'at</label><div class="bar"><i></i></div><output>0</output></div>
+    <div class="stat fame" data-k="fame"><label>Renown</label><div class="bar"><i></i></div><output>0</output></div>
     <div class="curse"><span>Curses</span><div class="pips" id="pips"></div></div>
   </section>
   <nav class="actions">
     <button class="act" id="bJob"><span class="g">𓌳</span>Work</button>
-    <button class="act" id="bPeople"><span class="g">𓀗</span>People</button>
+    <button class="act" id="bMore"><span class="g">𓎟</span>Assets</button>
     <button class="age" id="bAge"><b>+</b><span>Age</span></button>
+    <button class="act" id="bPeople"><span class="g">𓀗</span>People</button>
     <button class="act" id="bAct"><span class="g">𓋹</span>Activities</button>
-    <button class="act" id="bMore"><span class="g">𓁹</span>Life</button>
   </nav>
 </div>
 <div class="veil" id="veil" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
@@ -903,6 +906,7 @@ function newLife(opts={}){
      age:0,alive:true,health:R(70,100),happy:R(60,95),smarts:R(20,80),looks:R(20,90),maat:50,deben:cls.start,curse:0,
      job:null,school:!!cls.school,years:{},flags:{},cool:{},recent:[],amb:{},tr:{},items:[],people:[],nid:1,used:{}};
   Object.entries(cls.stats).forEach(([k,v])=>S[k]=clamp(S[k]+v));
+  mig();
   const mom=person("parent",{sex:"f",age:R(15,28),bond:R(65,95)});
   const dad=person("parent",{sex:"m",age:R(19,40),bond:R(40,90)});
   if(chance(.65))person("sibling",{age:R(1,8),bond:R(35,80)});
@@ -1309,7 +1313,7 @@ function ageUp(){
     const lim=p.type==="pet"?12:40;
     const risk=p.age>lim?(p.age-lim)*(p.type==="pet"?.12:.012):(p.type==="child"&&p.age<5?.02:.004);
     if(chance(risk)){p.alive=false;
-      if(p.type==="pet")log(`${p.name} the cat died. The whole house shaves their eyebrows in mourning. Egyptians really did this.`,{happy:-12},"bad");
+      if(p.type==="pet")log(`${p.name} the ${p.rel.toLowerCase()} died.${p.rel==="Cat"?" The whole house shaves their eyebrows in mourning. Egyptians really did this.":" You bury them at the edge of the desert with a bowl of food for the journey."}`,{happy:-12},"bad");
       else{const inh=p.type==="parent"&&S.age>=16?Math.round(CLASSES[S.cls].start/4+R(2,15)):0;
         log(`Your ${p.rel.toLowerCase()}, ${p.name}, died at ${p.age}. ${pick(["The embalmers take 70 days.","They're buried with bread, beer, and their favourite sandals.","The hired mourners wail. They earn every deben."])}${inh?` You inherit ${inh} deben.`:""}`,{happy:-15,deben:inh},"bad");}
     } else if(p.type!=="pet") p.bond=clamp(p.bond+R(-4,2));
@@ -1322,10 +1326,11 @@ function ageUp(){
   if(S.curse)d.happy=-S.curse*2;
   const c=CLASSES[S.cls];
   if(S.age>=5&&S.age<18&&c.allow)d.deben=c.allow;
-  if(S.job){const j=jobOf(S.job);d.deben=(d.deben||0)+j.pay+(S.bonus||0);if(S.job==="embalmer"&&chance(.1))d.curse=1;}
-  else if(S.cls==="royal"&&S.age>=18)d.deben=60;
-  if(Object.keys(d).length)log(S.job?`Another year as a ${jobOf(S.job).label.toLowerCase()}.`:c.allow&&S.age>=5&&S.age<18?"Your family gives you some pocket money.":"The year goes by.",d,"dim");
-  ambient();
+  if(S.job){const j=jobOf(S.job);d.deben=(d.deben||0)+jobPay();if(S.job==="embalmer"&&chance(.1))d.curse=1;}
+  else if(S.cls==="royal"&&S.age>=18&&!S.flags.abd&&!S.jail)d.deben=60;
+  if(Object.keys(d).length)log(S.job?`Another year of work as ${jobTitle()}.`:c.allow&&S.age>=5&&S.age<18?"Your family gives you some pocket money.":"The year goes by.",d,"dim");
+  yearly();
+  if(!S.jail)ambient();
   // death
   let risk=S.age<4?.01:S.age<30?.003:.003+(S.age-30)*.004;
   if(S.age>60)risk+=(S.age-60)*.018;
@@ -1340,7 +1345,7 @@ function ageUp(){
   const pool=EVENTS.filter(e=>e.st.includes(st)&&S.age>=(e.min??0)&&S.age<=(e.max??200)&&
     (S.cool[e.id]===undefined||S.age-S.cool[e.id]>=(e.cd??10))&&!S.recent.includes(e.id)&&(!e.needs||e.needs()));
   const q=[];
-  const n=chance(.38)?(chance(.1)?2:1):0;
+  const n=S.jail>0?0:chance(.38)?(chance(.1)?2:1):0;
   for(let i=0;i<n&&pool.length;i++){
     const ws=pool.map(e=>(e.w??1)*(e.wt?e.wt():1));const tot=ws.reduce((a,b)=>a+b,0);
     let x=Math.random()*tot,idx=0;for(;idx<ws.length-1;idx++){x-=ws[idx];if(x<=0)break}
@@ -1415,7 +1420,7 @@ function menuJob(){
 const ORDER=["parent","spouse","lover","child","sibling","friend","enemy","pet"];
 function menuPeople(){
   const groups=ORDER.map(t=>[t,S.people.filter(p=>p.type===t&&!p.left)]).filter(g=>g[1].length);
-  const head={parent:"Parents",spouse:"Spouse",lover:"Love",child:"Children",sibling:"Siblings",friend:"Friends",enemy:"Enemies",pet:"Pets"};
+  const head={parent:"Parents",spouse:"Spouse",lover:"Love",child:"Children",sibling:"Siblings",friend:"Friends",enemy:"Enemies",pet:"Pets",classmate:"Classmates"};
   openSheet(`<p class="kicker">Your world</p><h2>People</h2>${groups.map(([t,ps])=>`<p class="sec">${head[t]}</p><div class="choices">${ps.map(p=>`<button class="choice" data-id="${p.id}"><span>${esc(p.name)} <span style="color:var(--ink-dim)">· ${p.rel}</span></span><small>${p.alive?`age ${p.age} · ${p.type==="enemy"?"hatred "+(100-p.bond):"bond "+p.bond}`:"in the West"}</small></button>`).join("")}</div>`).join("")||`<p class="body">You don't know anyone. Go make a friend.</p>`}<button class="close" id="cl">Close</button>`);
   $("#sheet").querySelectorAll("[data-id]").forEach(b=>b.onclick=()=>personMenu(S.people.find(p=>p.id==b.dataset.id)));
 }
@@ -1540,8 +1545,8 @@ function placeMenu(key,only,title,here){
    ${!list.length&&!extra.length&&!dead.length?`<p class="note">There's nothing for you to do here at your age. Come back when you're older.</p>`:""}
    ${hint?`<p class="note" style="margin-top:10px">${hint}</p>`:""}
    <button class="close" id="cl">Keep walking</button>`);
-  $("#sheet").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{const a=ACTS.find(x=>x.k===b.dataset.k);S.used[a.k]=1;if(a.item)S.items.push(a.item);
-    const cue=actCue(a);if(here){cue.loc=null;cue.night=false;if(!cue.actor)cue.actor=actorFor(pick(["man","woman"]))}resolve(a.run(),null,cue)});
+  $("#sheet").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{const a=ACTS.find(x=>x.k===b.dataset.k);
+    const cue=actCue(a);if(here){cue.loc=null;cue.night=false;if(!cue.actor)cue.actor=actorFor(pick(["man","woman"]))}actGo(a,cue,null,title||PLACE_NAMES[key]||"Here")});
   $("#sheet").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{const x=extra[+b.dataset.x];S.used[x.k]=1;resolve(x.run(),null,x.cue)});
   $("#sheet").querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>personMenu(S.people.find(p=>p.id==b.dataset.d),true));
 }
@@ -1563,7 +1568,7 @@ function menuLife(){
    <div class="card" style="margin-bottom:12px">
     <div class="row"><span>Born to</span><span>${esc(CLASSES[S.cls].label)}, ${esc(S.city)}</span></div>
     <div class="row"><span>Schooling</span><span>${S.school?"House of Life":"None"}</span></div>
-    <div class="row"><span>Job</span><span>${S.job?esc(jobOf(S.job).label):"None"}</span></div>
+    <div class="row"><span>Job</span><span>${S.job?esc(jobTitle()):"None"}</span></div>
     <div class="row"><span>Known as</span><span>${t.length?esc(t.join(", ")):"Nobody special yet"}</span></div>
     <div class="row" style="border:0"><span>Belongings</span><span>${S.items.length?esc(S.items.join(", ")):"Nothing"}</span></div>
    </div>
@@ -1600,7 +1605,8 @@ function weighing(){
     ["I have given bread to the hungry.",T("kind")>=2||S.maat>=60]
   ];
   const scarab=S.items.includes("Heart scarab");
-  const weight=S.maat-S.curse*8+(scarab?6:0);
+  const book=S.items.includes("Book of the Dead scroll");
+  const weight=S.maat-S.curse*8+(scarab?6:0)+(book?5:0);
   const pass=weight>=50;
   const angle=pass?(weight>=70?6:0):-12;
   $("#hall").hidden=false;
@@ -1632,14 +1638,16 @@ function weighing(){
       <div class="row"><span>Born to</span><span>${esc(CLASSES[S.cls].label)}, ${esc(S.city)}</span></div>
       <div class="row"><span>Died</span><span>Age ${S.age}, ${esc(S.cause)}</span></div>
       <div class="row"><span>Known as</span><span>${t.length?esc(t.slice(0,3).join(", ")):"Nobody in particular"}</span></div>
-      <div class="row"><span>Job</span><span>${S.job?esc(jobOf(S.job).label):"None"}</span></div>
+      <div class="row"><span>Job</span><span>${S.job?esc(jobTitle()):"None"}</span></div>
       <div class="row"><span>Wealth</span><span>${S.deben} deben</span></div>
+      <div class="row"><span>Renown</span><span>${S.fame}/100</span></div>
+      <div class="row"><span>Buried in</span><span>${esc(bestTomb())}</span></div>
       <div class="row"><span>Children</span><span>${kids}</span></div>
       <div class="row"><span>Ma'at</span><span>${S.maat}/100${S.curse?`, ${S.curse} curse${S.curse>1?"s":""}`:""}</span></div>
       <div class="row" style="border:0"><span>Afterlife</span><span style="color:${pass?"var(--faience)":"var(--carnelian)"}">${pass?"Field of Reeds":"Devoured by Ammit"}</span></div></div>
-     <button class="big-btn" id="again">Live another life</button>
+     ${heirHtml()}<button class="big-btn" id="again">Live another life</button>
      <button class="big-btn ghost" id="review">Read your life story</button>`;
-    $("#again").onclick=()=>{$("#hall").hidden=true;showStart()};
+    $("#again").onclick=()=>{$("#hall").hidden=true;showStart()};bindHeir();
     $("#review").onclick=()=>{$("#hall").hidden=true};
     $("#again").focus();
   },t0+3200);
@@ -1648,15 +1656,15 @@ function weighing(){
 /* ================= render ================= */
 function render(){
   if(!S)return;
-  W.setNPCs(S.alive?S.people.filter(p=>p.alive&&!p.left).map(p=>({id:p.id,label:p.type==="pet"?p.name+" the cat":p.name+" ("+p.rel+")",place:NPC_PLACE[p.type]||"home",spec:personActor(p)})).filter(n=>n.spec):[]);
+  W.setNPCs(S.alive?S.people.filter(p=>p.alive&&!p.left).map(p=>({id:p.id,label:p.type==="pet"?p.name+" the "+p.rel.toLowerCase():p.name+" ("+p.rel+")",place:NPC_PLACE[p.type]||"home",spec:personActor(p)})).filter(n=>n.spec):[]);
   $("#name").textContent=S.name;
-  const job=S.job?jobOf(S.job).label:(S.cls==="royal"?"Royal":"");
+  const job=S.job?jobTitle():(S.cls==="royal"?"Royal":"");
   $("#meta").textContent=`${S.alive?"Age "+S.age:"Died at "+S.age} · ${S.city}${job?" · "+job:""}`;
   $("#traits").innerHTML=traitList().slice(0,3).map(t=>`<span>${esc(t)}</span>`).join("");
   $("#deben").textContent=S.deben;
   $("#ava").textContent=!S.alive?"𓋹":S.age<4?"𓀔":S.cls==="royal"?"𓀭":S.sex==="m"?"𓀀":"𓁐";
   document.querySelectorAll(".stat").forEach(el=>{const v=S[el.dataset.k];el.querySelector("output").textContent=v;const i=el.querySelector("i");i.style.width=v+"%";
-    if(el.dataset.k!=="maat")i.style.background=v<25?"var(--carnelian)":v<50?"var(--ember)":"var(--faience)"});
+    if(el.dataset.k!=="maat"&&el.dataset.k!=="fame")i.style.background=v<25?"var(--carnelian)":v<50?"var(--ember)":"var(--faience)"});
   $("#pips").innerHTML=Array.from({length:5},(_,i)=>`<span class="${i<S.curse?"on":""}"></span>`).join("");
   const ages=Object.keys(S.years).map(Number).sort((a,b)=>a-b);
   $("#log").innerHTML=ages.map(a=>`<div class="year"><h3>Age ${a}</h3>${S.years[a].map(l=>`<p class="${l.tone}">${esc(l.t)}${l.c}</p>`).join("")}</div>`).join("");
@@ -1684,10 +1692,445 @@ function showStart(){
 function save(){try{localStorage.setItem("hvf2",JSON.stringify(S))}catch(e){}}
 function load(){try{return JSON.parse(localStorage.getItem("hvf2")||"null")}catch(e){return null}}
 const guard=f=>()=>{if(!busy)f()};$("#bAge").onclick=guard(ageUp);$("#bAct").onclick=guard(menuActs);$("#bJob").onclick=guard(menuJob);$("#bPeople").onclick=guard(menuPeople);$("#bMore").onclick=guard(menuLife);
+/* ================= Life-sim depth: school, careers, assets, shops, skills, travel, law, renown, prison, generations ================= */
+Object.assign(STAT_NAMES,{fame:"Renown",respect:"Respect",perf:"Work",grade:"Grades"});
+function mig(){
+  const d={fame:0,debt:0,jobLvl:0,jobYrs:0,perf:50,grade:50,jail:0,respect:50,heir:null,pension:0,gen:1};
+  for(const k in d)if(S[k]===undefined)S[k]=d[k];
+  if(!S.skills)S.skills={};
+  if(S.lit===undefined)S.lit=!!(S.school&&S.age>=16);
+}
+const he=p=>p.sex==="m"?"he":"she",He=p=>p.sex==="m"?"He":"She";
+function fresh(tag,n){const f=[];for(let i=0;i<n;i++)if(!S.amb[tag+i])f.push(i);if(!f.length)return -1;const i=pick(f);S.amb[tag+i]=1;return i}
+function pickSheet(kick,title,intro,q,opts,cb,back){
+  openSheet(`<p class="kicker">${esc(kick)}</p><h2>${esc(title)}</h2>${intro?`<p class="note">${esc(intro)}</p>`:""}<p class="sec">${esc(q)}</p><div class="choices">${opts.map((o,i)=>`<button class="choice" data-i="${i}" ${o.dis?"disabled":""}><span>${esc(o.l)}</span>${o.s?`<small>${esc(o.s)}</small>`:""}</button>`).join("")}</div><button class="close" id="cl">Never mind</button>`);
+  $("#cl").onclick=back||closeSheet;
+  $("#sheet").querySelectorAll(".choice").forEach(b=>b.onclick=()=>cb(opts[+b.dataset.i]));
+}
+const bar=v=>`<div class="bar" style="flex:1;max-width:120px"><i style="width:${v}%"></i></div>`;
+
+/* ---------- careers with ranks ---------- */
+const RANKS={farmer:["Field hand","Tenant farmer","Field overseer","Estate steward"],brick:["Brickmaker","Kiln master","Master builder"],fisher:["Fisherman","Boat owner","Master of the fish market"],
+ soldier:["Foot soldier","Archer","Charioteer","Troop commander","General of the army"],builder:["Stone hauler","Tomb carver","Outline draughtsman","Foreman of the crew"],embalmer:["Linen wrapper","Embalmer","Overseer of the mysteries"],
+ scribe:["Apprentice scribe","Scribe","Chief scribe","Royal scribe","Vizier"],priest:["Wab priest","Lector priest","Prophet of Amun","High priest of Amun"],cupbearer:["Royal cupbearer","Royal butler","Fan-bearer on the king's right"],
+ brewer:["Brewer","Master brewer","Brewer to the temple"],weaver:["Weaver","Master weaver","Overseer of the royal linen"],potter:["Potter","Master potter"],goldsmith:["Goldsmith's apprentice","Goldsmith","Chief goldsmith of Amun"],
+ musician:["Temple musician","Chief of singers","Musician to Pharaoh"],merchant:["River merchant","Master of a trading fleet"],physician:["Apprentice healer","Physician","Chief of physicians","Physician to Pharaoh"],architect:["Royal architect","Overseer of all the king's works"]};
+JOBS.push(
+ {k:"brewer",label:"Brewer",pay:14,req:()=>true,line:"You mash barley bread into beer. Egypt runs on it. Even children drink the weak kind."},
+ {k:"weaver",label:"Weaver",pay:15,req:()=>true,line:"You weave linen so fine the nobles call it woven air."},
+ {k:"potter",label:"Potter",pay:13,req:()=>true,line:"You spin jars on a wheel. The god Khnum made the first people the same way."},
+ {k:"goldsmith",label:"Goldsmith",pay:42,req:()=>S.smarts>=40,reqT:"Smarts 40+",line:"You blow through a reed pipe to melt gold. Egyptians call gold the flesh of the gods."},
+ {k:"musician",label:"Temple musician",pay:30,req:()=>(S.skills.harp||0)>=3,reqT:"Learn the harp",line:"You play for the god at dawn and for drunk nobles at night."},
+ {k:"merchant",label:"River merchant",pay:45,req:()=>S.items.some(i=>/boat|barge/i.test(i)),reqT:"Own a boat",line:"You trade grain upriver and gossip downriver."},
+ {k:"physician",label:"Physician",pay:70,req:()=>(S.skills.med||0)>=3,reqT:"Study medicine",line:"You set bones, stitch wounds, and prescribe honey for almost everything."},
+ {k:"architect",label:"Royal architect",pay:95,req:()=>S.lit&&S.smarts>=75,reqT:"Can read, Smarts 75+",line:"You draw temples on papyrus. Thousands of men make them real."});
+Object.assign(JOB_LOC,{brewer:"market",weaver:"home",potter:"market",goldsmith:"market",musician:"temple",merchant:"river",physician:"home",architect:"necro"});
+jobOf("scribe").req=()=>S.smarts>=65||(S.lit&&S.smarts>=45);jobOf("scribe").reqT="Smarts 65+, or schooling";
+function jobTitle(){const rk=RANKS[S.job];return rk?rk[Math.min(S.jobLvl||0,rk.length-1)]:jobOf(S.job).label}
+function jobPay(){return Math.round(jobOf(S.job).pay*(1+0.5*(S.jobLvl||0)))+(S.bonus||0)}
+function inSchool(){return S.school&&S.age>=5&&S.age<=15&&!S.jail}
+function takeJob(j){S.job=j.k;S.jobLvl=0;S.jobYrs=0;S.perf=50;S.bonus=0}
+
+/* ---------- things you can own ---------- */
+const PROP_UP={"House":2,"Townhouse in the city":6,"Villa with a garden pool":15,"Pleasure barge":8,"Chariot and two horses":10};
+const KEEP=/House|Townhouse|Villa|estate|boat|barge|Donkey|Ox cart|Chariot|collar|earrings|ring|Harp|flute|Sistrum/i;
+const SHOPS={
+ jeweller:{name:"Nebnefer the jeweller",who:"man",items:[["Faience bead collar",8,{looks:3},"Blue faience beads, the colour of the sky. Cheap, cheerful, and on every neck in Egypt."],["Carnelian ring",25,{looks:3,happy:3},"Carnelian is the colour of blood, so it's worn for protection."],["Gold earrings",40,{looks:6},"Men and women both wear them. The bigger, the better."],["Broad collar of gold",220,{looks:10,fame:3},"It's heavy enough that you need a counterweight down your back. That's how you know it's real."]]},
+ shady:{name:"Shady Hori's bargain gems",who:"stranger",note:"Hori swears everything is real. Hori swears a lot.",items:[["'Gold' bracelet",6,{looks:2},"It's copper with ambition."],["'Lapis' amulet",4,{looks:1},"The blue is paint."],["'Royal' signet ring",12,{looks:3},"Hori says it belonged to a king. He won't say which."]]},
+ clothier:{name:"The linen seller",who:"woman",items:[["Leather sandals",2,{happy:2},"Most Egyptians go barefoot and carry their sandals to keep them nice. You'll do the same."],["Pleated linen robe",20,{looks:5},"The pleats take a servant an hour to press. You don't have a servant yet."],["Leopard-skin cloak",90,{looks:6,fame:2},"Priests wear these. People step aside for you now."]]},
+ boats:{name:"The boatyard",who:"man",items:[["Wooden fishing boat",120,{happy:8},"Acacia planks tied together with rope. It leaks a normal amount."],["Pleasure barge",900,{happy:20,fame:6},"A painted barge with a shaded cabin and room for musicians. The Nile is your garden now."]]},
+ stable:{name:"The animal yard",who:"man",items:[["Ox cart",60,{happy:4},"Slow, loud, and it carries everything you own."],["Chariot and two horses",700,{happy:15,fame:5,looks:3},"Horses came to Egypt with the Hyksos invaders. Now nothing says wealth like two of them.",()=>(S.skills.chariot||0)>=2,"Learn to drive first"]]},
+ broker:{name:"Meryptah, seller of houses",who:"scribe",items:[["Townhouse in the city",400,{happy:15,fame:2},"Three floors, a roof terrace, and neighbours on every side."],["Villa with a garden pool",1200,{happy:22,fame:6},"A walled garden with a fish pool, date palms and a wine press."],["Country estate",4000,{happy:25,fame:10},"Fields, cattle and tenants. It pays you 60 deben every year."]]},
+ tomb:{name:"The tomb builders",who:"man",note:"Egyptians spend more on their tomb than on their house. You'll be in it longer.",items:[["Brick-lined grave",30,{happy:3},"Better than a pit in the sand, which is what most people get."],["Rock-cut tomb",200,{happy:6,fame:2},"A chamber cut into the western cliffs, with your name over the door."],["Painted tomb with a chapel",800,{happy:10,fame:6},"The walls show you eating, hunting and winning at senet, forever."],["Shabti servant figures",15,{happy:3},"Little statues that do your farm work in the afterlife. Rich people buy 365, one for each day."],["Book of the Dead scroll",60,{maat:2},"A papyrus of spells for passing judgment, with a blank left for your name. It's a cheat sheet for the afterlife."]]},
+ music:{name:"The instrument maker",who:"man",items:[["Harp",30,{happy:5},"Seven strings and a carved head on the end."],["Sistrum rattle",6,{happy:2},"The sacred rattle of Hathor. It sounds like wind in papyrus."],["Double flute",10,{happy:3},"Two reed pipes played at once. Your neighbours will learn to love it."]]}
+};
+function itemVal(n){for(const k in SHOPS){if(k==="shady")continue;const it=SHOPS[k].items.find(i=>i[0]===n);if(it)return it[1]}return {House:150,Donkey:25,"Papyrus boat":40,Wig:15,"Fine linen":10,"Heart scarab":20,"Bes amulet":3,"Painted coffin":60,"Plain coffin":15}[n]||0}
+function upkeep(){return S.items.reduce((a,i)=>a+(PROP_UP[i]||0),0)}
+function bestTomb(){return ["Painted tomb with a chapel","Rock-cut tomb","Brick-lined grave","Painted coffin","Plain coffin"].find(t=>S.items.includes(t))||"A pit in the desert sand"}
+function shopMenu(key,back){
+  const sh=SHOPS[key];
+  openSheet(`<p class="kicker">Market</p><h2>${esc(sh.name)}</h2>${sh.note?`<p class="note">${esc(sh.note)}</p>`:""}<div class="choices">${sh.items.map((it,i)=>{const own=S.items.includes(it[0]),poor=S.deben<it[1],lock=it[4]&&!it[4]();
+    return `<button class="choice" data-i="${i}" ${own||poor||lock?"disabled":""}><span>${esc(it[0])}</span><small>${own?"Owned":lock?esc(it[5]):poor?"Need "+it[1]+" deben":it[1]+" deben"}</small></button>`}).join("")}</div><button class="close" id="cl">Back</button>`);
+  $("#cl").onclick=back||closeSheet;
+  $("#sheet").querySelectorAll(".choice").forEach(b=>b.onclick=()=>{const it=sh.items[+b.dataset.i];S.items.push(it[0]);let t=`You buy: ${it[0]}. ${it[3]}`,o=Object.assign({deben:-it[1]},it[2]),tone="good";
+    if(key==="shady"&&chance(.35)){t+=" A week later it turns your skin green in front of everyone.";o.looks=-3;o.happy=-5;tone="bad"}
+    resolve(r(t,o,tone),()=>shopMenu(key,back),{loc:"market",g:"give",actor:actorFor(sh.who),label:it[0]})});
+}
+const PETS=[["Cat",5,"A mouser, and sacred to Bastet. Harming one is a crime."],["Goose",2,"Geese are sacred to Amun and guard a house better than a dog."],["Tesem hound",10,"A lean hunting dog with pointed ears and a curled tail. Egyptians name their dogs. Cats are all just called Miu."],["Gazelle",20,"Nobles keep them in the garden. It will eat the garden."],["Falcon",25,"The bird of Horus. It looks at you like you owe it money."],["Baby baboon",30,"Baboons can be trained to pick figs and to catch thieves."],["Cheetah",150,"A tame cheetah on a leash is the most expensive way to walk through a market."]];
+const PET_NAMES=["Miu","Nedjem","Abu","Iwiw","Tjesem","Bebi","Ankhu","Senbi","Hori","Kiki","Pepy","Titi"];
+function petShop(back){
+  const full=alive("pet").length>=4;
+  openSheet(`<p class="kicker">Market</p><h2>The animal market</h2>${full?`<p class="note">Your house is full of animals already.</p>`:""}<div class="choices">${PETS.map((p,i)=>{const lock=S.age<5||full,poor=S.deben<p[1];return `<button class="choice" data-i="${i}" ${lock||poor?"disabled":""}><span>${p[0]}</span><small>${poor?"Need "+p[1]+" deben":p[1]+" deben"}</small></button>`}).join("")}</div><button class="close" id="cl">Back</button>`);
+  $("#cl").onclick=back||closeSheet;
+  $("#sheet").querySelectorAll(".choice").forEach(b=>b.onclick=()=>{const sp=PETS[+b.dataset.i];const p=person("pet",{name:pick(PET_NAMES),rel:sp[0],age:0,bond:70});p.species=sp[0];
+    resolve(r(`You bring home a ${sp[0].toLowerCase()} and name it ${p.name}. ${sp[2]}`,{deben:-sp[1],happy:10},"good"),()=>petShop(back),{loc:"market",g:"pet",actor:{type:"cat"},label:sp[0]})});
+}
+
+/* ---------- money: loans, will ---------- */
+function loanMenu(back){
+  if(S.age<16)return pickSheet("Money","The grain lender","He doesn't lend to children.","Come back when you're 16",[],()=>{},back);
+  pickSheet("Money","The grain lender",`He lends at a fifth extra every year. That was the normal rate. ${S.debt?`You already owe him ${S.debt} deben.`:""}`,"How much do you borrow?",[20,50,200].map(v=>({l:v+" deben",s:"owe "+Math.round(v*1.2),v})),o=>{S.debt+=Math.round(o.v*1.2);
+    resolve(r(`You borrow ${o.v} deben from the grain lender. He writes your name on a potsherd and smiles.`,{deben:o.v}),back,{loc:"market",g:"reach",actor:actorFor("scribe"),label:"Borrow money"})},back);
+}
+function repayDebt(back){const pay=Math.min(S.deben,S.debt);S.debt-=pay;resolve(r(pay?`You pay the grain lender ${pay} deben. ${S.debt?`You still owe ${S.debt}.`:"He smashes the potsherd with your name on it. You're free."}`:"You have nothing to pay him with.",{deben:-pay,happy:S.debt?1:8},S.debt?"":"good"),back,{loc:"market",g:"give",actor:actorFor("scribe"),label:"Repay debt"})}
+function willMenu(back){
+  const c=S.people.filter(p=>p.alive&&(p.type==="child"||p.type==="spouse"));
+  pickSheet("Legacy","Your will",c.length?"A scribe writes it down in front of witnesses. Egyptian women could inherit and leave property too.":"You have no spouse or children to leave anything to.","Who inherits everything?",c.map(p=>({l:p.name,s:p.rel+(S.heir===p.id?" · current heir":""),v:p.id})),o=>{S.heir=o.v;const p=S.people.find(x=>x.id===o.v);bondFx(p,10);
+    resolve(r(`Your will names ${p.name} as your heir. The others will find out at the funeral.`,{happy:2}),back,{loc:"temple",g:"write",actor:actorFor("scribe"),label:"Dictate your will"})},back);
+}
+function menuAssets(){
+  const props=S.items.filter(i=>/House|Townhouse|Villa|estate/i.test(i)),home=props.length?props[props.length-1]:S.age<18?"Your family's house":"A rented room";
+  const inc=(S.job?jobPay():0)+(S.pension||0)+(S.items.includes("Country estate")?60:0),up=upkeep();
+  openSheet(`<p class="kicker">Age ${S.age}</p><h2>Assets</h2>
+   <div class="card" style="margin-bottom:12px">
+    <div class="row"><span>Savings</span><span>${S.deben} deben</span></div>
+    <div class="row"><span>Income a year</span><span>${inc} deben</span></div>
+    ${up?`<div class="row"><span>Upkeep a year</span><span>${up} deben</span></div>`:""}
+    ${S.debt?`<div class="row"><span>Debt</span><span style="color:var(--carnelian)">${S.debt} deben</span></div>`:""}
+    <div class="row"><span>Home</span><span>${esc(home)}</span></div>
+    <div class="row" style="border:0"><span>Your tomb</span><span>${esc(bestTomb())}</span></div></div>
+   <p class="sec">Belongings</p>${S.items.length?`<div class="choices">${S.items.map((n,i)=>{const v=Math.round(itemVal(n)/2);return `<button class="choice" data-s="${i}" ${v?"":"disabled"}><span>${esc(n)}</span><small>${v?"Sell for "+v:"Can't be sold"}</small></button>`}).join("")}</div>`:`<p class="note">You own nothing${S.age<10?". You're a child, so that's normal":""}.</p>`}
+   <p class="sec">Money</p><div class="choices">
+    <button class="choice" id="aLoan"><span>Borrow from the grain lender</span></button>
+    ${S.debt?`<button class="choice" id="aPay"><span>Repay your debt</span><small>${S.debt} deben</small></button>`:""}
+    ${S.age>=18?`<button class="choice" id="aWill"><span>Dictate your will</span></button>`:""}
+    ${S.age>=10?`<button class="choice" id="aTomb"><span>Visit the tomb builders</span></button>`:""}</div>
+   <button class="close" id="cl">Close</button>`);
+  $("#sheet").querySelectorAll("[data-s]").forEach(b=>b.onclick=()=>{const n=S.items.splice(+b.dataset.s,1)[0],v=Math.round(itemVal(n)/2);
+    resolve(r(`You sell your ${n.toLowerCase()} for ${v} deben. The buyer says it's worth half. It's always worth half.`,{deben:v}),menuAssets,{loc:"market",g:"give",actor:actorFor("man"),label:"Sell: "+n})});
+  $("#aLoan").onclick=()=>loanMenu(menuAssets);if($("#aPay"))$("#aPay").onclick=()=>repayDebt(menuAssets);if($("#aWill"))$("#aWill").onclick=()=>willMenu(menuAssets);if($("#aTomb"))$("#aTomb").onclick=()=>shopMenu("tomb",menuAssets);
+}
+
+/* ---------- crime and punishment ---------- */
+function sentence(y,line){S.jail=y;S.job=null;S.flags.inMine=0;return r(`${line} The court sentences you to ${y} years of hard labour in the gold mines of Nubia.`,{happy:-25,maat:-5},"bad")}
+function caught(sev,what){
+  if(sev>=2&&chance(sev===3?.6:.3))return sentence(R(1,3)*sev,`You're caught ${what}.`);
+  if(sev>=2&&chance(.35))return r(`You're caught ${what}. The court orders your nose cut off. It's a standard sentence, so everyone who sees you will know.`,{looks:-30,happy:-20,maat:-6},"bad");
+  return r(`You're caught ${what}. You get a hundred blows with a stick.`,{health:-18,happy:-8,maat:-4},"bad");
+}
+const MINE=["You break quartz with a stone hammer from dawn to dusk.","You carry baskets of ore up a shaft too low to stand in.","The overseer counts the prisoners twice a day. The number keeps getting smaller.","You grind ore to dust on a stone slab. The dust is in your bread now."];
+function jailMenu(){
+  if(!S.flags.inMine){S.flags.inMine=1;W.travel("desert")}
+  const u=k=>S.used["j_"+k];
+  openSheet(`<p class="kicker">Prisoner · ${S.jail} year${S.jail>1?"s":""} left</p><h2>The gold mines of Nubia</h2><p class="note">Pharaoh's gold comes from here, dug out by prisoners in the desert heat. Tap Age to serve your time.</p><div class="choices">
+    <button class="choice" data-j="work" ${u("work")?"disabled":""}><span>Work hard and keep your head down</span></button>
+    <button class="choice" data-j="run" ${u("run")?"disabled":""}><span>Try to escape</span></button>
+    <button class="choice" data-j="bribe" ${u("bribe")||S.deben<60?"disabled":""}><span>Bribe a guard</span><small>${S.deben<60?"Need 60 deben":"60 deben"}</small></button>
+    <button class="choice" data-j="pray" ${u("pray")?"disabled":""}><span>Pray to Ma'at for mercy</span></button></div><button class="close" id="cl">Close</button>`);
+  $("#sheet").querySelectorAll("[data-j]").forEach(b=>b.onclick=()=>{const k=b.dataset.j;S.used["j_"+k]=1;let res;
+    if(k==="work"){if(S.jail>1&&chance(.3)){S.jail--;res=r("The overseer notices you never cause trouble. He takes a year off your sentence.",{health:-5,happy:5},"good")}else res=r(pick(MINE),{health:-5})}
+    else if(k==="run"){if(chance(.25)){S.jail=0;res=r("You slip away at night and follow the stars north for nine days. You're free, and very thirsty.",{health:-15,happy:20},"good")}else{S.jail+=2;res=r("The desert police track you with dogs before noon. Two more years, and a beating.",{health:-15,happy:-10},"bad")}}
+    else if(k==="bribe"){S.jail=0;res=r("The guard looks at the deben, looks at the desert, and looks away. You're gone by morning.",{deben:-60,maat:-4,happy:15},"good")}
+    else res=r("You tell Ma'at you're sorry. In the mines, you actually mean it.",{maat:4,happy:2});
+    resolve(res,S.jail>0?jailMenu:()=>{S.flags.inMine=0;W.travel("home")},{loc:"desert",g:k==="pray"?"pray":k==="run"?"run":k==="bribe"?"give":"carry",actor:k==="bribe"?actorFor("soldier"):null,label:b.querySelector("span").textContent})});
+}
+
+/* ---------- every year ---------- */
+const NEWS=["A granary in Avaris caught fire. Bread prices doubled for a month.","A sandstorm buried the caravan road for three days.","A new obelisk went up at Karnak. It took two thousand men and a lot of shouting.","Envoys from Babylon arrived with horses and lapis lazuli as gifts for Pharaoh.","A hippo overturned the ferry at Edfu. Everyone swam. Nobody was calm.","The flood was perfect this year: sixteen cubits on the Nilometer.","The sun went dark for a few minutes at midday. The priests say they predicted it. They did not.","Tomb robbers were caught in the Valley of the Kings. Their trial is the only thing anyone talks about.","A ship came back from Punt with incense trees, gold and a very angry baboon.","Locusts crossed the delta. Farmers banged pots at them for two days.","Pharaoh celebrated his jubilee by running a lap around the palace courtyard. The court said he looked young.","A crocodile was found asleep in the temple laundry pool. The priests declared it a blessing."];
+function yearly(){
+  if(S.jail>0){S.jail--;if(S.jail>0)log(pick(MINE),{health:-R(3,6),happy:-5},"bad");else{log("Your sentence is over. You walk north out of the mines until you see green again.",{happy:15},"good");S.flags.inMine=0;W.travel("home")}}
+  const cm=S.people.filter(p=>p.type==="classmate"&&!p.left);
+  if(inSchool()){
+    if(!S.flags.schoolSeen){S.flags.schoolSeen=1;log("You're enrolled at the House of Life, the school for scribes. Fewer than one Egyptian in a hundred ever learns to read.",{smarts:2},"good")}
+    if(!cm.length)for(let i=0;i<4;i++)person("classmate",{rel:"Classmate",age:Math.max(4,S.age+R(-1,1)),bond:R(30,60)});
+    S.grade=clamp(S.grade+R(-5,4));
+  }else{
+    cm.forEach(p=>{p.alive=false;p.left=true});
+    if(S.school&&S.age>=16&&!S.lit){S.lit=true;const top=S.grade>=70;log(top?"You finish at the House of Life at the top of your class. Your teacher almost smiles.":"You finish at the House of Life. You can read and write, which puts you above nearly everyone in Egypt.",{smarts:top?6:3,fame:top?2:0},"good")}
+  }
+  if(S.job){S.jobYrs=(S.jobYrs||0)+1;S.perf=clamp(S.perf+R(-6,3));const rk=RANKS[S.job]||[];
+    if(S.jobLvl<rk.length-1&&S.jobYrs>=2&&S.perf>=55&&chance(.12+S.perf/300)){S.jobLvl++;S.jobYrs=0;const top=S.jobLvl>=rk.length-1;log(`You're promoted. Your new title is ${rk[S.jobLvl]}, and your pay is ${jobPay()} deben a year.`,{happy:8,fame:top?8:S.jobLvl>=2?3:0},"good")}
+    else if(S.perf<18&&chance(.5)){log(`Your overseer has had enough of you. You lose your post as ${jobTitle()}.`,{happy:-10},"bad");S.job=null;S.jobLvl=0}}
+  const net=(S.pension||0)+(S.items.includes("Country estate")?60:0)-upkeep();
+  if(net>0)log("Your pension and estates bring in deben.",{deben:net},"dim");
+  else if(net<0){const short=Math.max(0,-net-S.deben);log("You pay for the upkeep of what you own.",{deben:net},"dim");if(short){S.debt+=short;log(`You couldn't cover it all. ${short} deben goes on your account with the grain lender.`,null,"bad")}}
+  if(S.debt>0){S.debt=Math.round(S.debt*1.2);
+    if(S.debt>300&&chance(.35)){const i=S.items.findIndex(n=>itemVal(n)>=20);
+      if(i>=0){const n=S.items.splice(i,1)[0];S.debt=Math.max(0,S.debt-itemVal(n));log(`The grain lender's men take your ${n.toLowerCase()} to cover part of your debt.`,{happy:-10},"bad")}
+      else{S.debt=Math.round(S.debt*.6);log("You can't pay the grain lender, so you work his fields for a season to settle part of it.",{health:-8,happy:-8},"bad")}}
+    else log(`Your debt to the grain lender has grown to ${S.debt} deben.`,null,"bad")}
+  if(S.jail>0)return;
+  const par=one("parent");
+  if(par&&S.age>=1&&S.age<13&&chance(.5)){const a=`Your ${par.rel.toLowerCase()}, ${par.name},`;
+    const L=S.age<4?[`${a} says your babbling sounds like a temple hymn.`,`${a} carried you to the river to watch the boats.`,`${a} tied a new amulet around your neck.`,`${a} gave you your first honey cake. You have a new favourite thing.`,`${a} shaved your head and left one braid at the side. All children wear it.`]
+     :[`${a} took you fishing in the reeds.`,`${a} took you to watch an obelisk being dragged to the temple.`,`${a} and you talked about where the sun goes at night.`,`${a} and you talked about why the neighbour has so many cats.`,`${a} showed you how to make a toy boat out of papyrus.`,`${a} took you to the quay to watch ships from Byblos unload cedar.`,`${a} let you taste beer. The children's kind is mostly bread.`,`${a} took you to see the temple geese. One of them remembers you.`,`${a} and you talked about why the moon changes shape. The answer was Thoth.`,`${a} took you to the potter's yard to watch jars being made.`];
+    const i=fresh(S.age<4?"fb":"fc",L.length);if(i>=0)log(L[i],{happy:2},"dim")}
+  const fr=one("friend");
+  if(fr&&S.age>=8&&chance(.14)){if(fr.bond>=70&&!fr.best){fr.best=true;fr.rel="Best friend";log(`Your friend ${fr.name} asked you to be best friends. You said yes.`,{happy:6},"good")}
+    else{const L=[`Your friend ${fr.name} taught you a rude song about the tax collector.`,`Your friend ${fr.name} and you got sunburned at the river and blamed each other.`,`Your friend ${fr.name} told everyone your secret. It was a small secret, but still.`,`Your friend ${fr.name} brought you figs when you were sick.`];const i=fresh("fr",L.length);if(i>=0)log(L[i],{happy:i===2?-3:3},"dim")}}
+  const pet=one("pet");
+  if(pet&&chance(.18)){const n=`${pet.name} the ${pet.rel.toLowerCase()}`,L=[`${n} stole a roast duck from the neighbours.`,`${n} fell asleep on the bread dough. The bread rose anyway.`,`${n} chased a priest halfway down the street.`,`${n} brought you a dead snake as a gift.`,`${n} got into the beer jar. Nobody slept that night.`];const i=fresh("pt",L.length);if(i>=0)log(L[i],{happy:3},"dim")}
+  if(S.age>=6&&chance(.14)){const i=fresh("nw",NEWS.length);if(i>=0)log(NEWS[i],null,"dim")}
+}
+
+/* ---------- work and school ---------- */
+menuJob=function(){
+  if(S.age<5){openSheet(`<h2>Work and school</h2><p class="body">You're ${S.age}. Your only job is to not fall in the river.</p><button class="close" id="cl">Close</button>`);return}
+  const cur=S.job?jobOf(S.job):null,u=k=>S.used["w_"+k],B=(k,l,s)=>`<button class="choice" data-w="${k}" ${u(k)?"disabled":""}><span>${l}</span><small>${u(k)?"Done this year":s||""}</small></button>`;
+  let h=`<p class="kicker">Age ${S.age}</p><h2>Work and school</h2>`;
+  if(inSchool())h+=`<p class="sec">School</p><div class="card" style="margin-bottom:8px"><div class="row"><span>House of Life</span><span>Scribe school</span></div><div class="row" style="border:0;align-items:center"><span>Grades</span>${bar(S.grade)}</div></div>
+    <div class="choices">${B("study","Study harder")}${B("skip","Skip class")}${B("teacher","Bring the teacher a honey cake")}<button class="choice" data-w="mates"><span>Classmates</span><small>›</small></button></div>`;
+  else if(S.age<16&&!S.school)h+=`<p class="sec">School</p><p class="note">You're not in school. Only families with money send children to the House of Life.</p>`;
+  if(cur)h+=`<p class="sec">Your job</p><div class="card" style="margin-bottom:8px"><div class="row"><span>Title</span><span>${esc(jobTitle())}</span></div><div class="row"><span>Pay</span><span>${jobPay()} deben a year</span></div><div class="row" style="border:0;align-items:center"><span>Performance</span>${bar(S.perf)}</div></div>
+    <div class="choices">${B("harder","Work harder")}${B("slack","Slack off")}${B("flatter","Flatter the overseer")}${B("raise","Ask for a raise")}${S.age>=50&&S.jobYrs+S.jobLvl*3>=6?B("retire","Retire","Half pay for life"):""}<button class="choice" data-w="quit"><span>Quit</span></button></div>`;
+  if(S.pension)h+=`<p class="note" style="margin-top:8px">You're retired on ${S.pension} deben a year.</p>`;
+  if(S.age>=14)h+=`<p class="sec">Find work</p><div class="choices">${JOBS.filter(j=>j.k!==S.job).map(j=>`<button class="choice" data-j="${j.k}" ${j.req()?"":"disabled"}><span>${esc(j.label)}</span><small>${j.req()?j.pay+" deben a year":esc(j.reqT)}</small></button>`).join("")}</div>`;
+  if(!S.job&&S.age>=6)h+=`<p class="sec">Odd jobs</p><div class="choices">${ODD.filter(o=>S.age>=o.min).map(o=>`<button class="choice" data-o="${o.k}" ${S.used.odd?"disabled":""}><span>${esc(o.label)}</span><small>${S.used.odd?"Done this year":o.pay[0]+"-"+o.pay[1]+" deben"}</small></button>`).join("")}</div>`;
+  openSheet(h+`<button class="close" id="cl">Close</button>`);
+  const jl=()=>JOB_LOC[S.job]||"home";
+  $("#sheet").querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{const k=b.dataset.w;if(k==="mates")return menuPeople();S.used["w_"+k]=1;let res,cue={loc:jl(),g:"carry",actor:actorFor("man"),label:b.querySelector("span").textContent};
+    if(k==="study"){tr("scholar");res=r(pick(["You copy hieroglyphs until you go cross-eyed.","You stay up by oil lamp copying out the Satire of the Trades, a text about how every job except scribe is terrible.","You practise on a flake of limestone because papyrus is too expensive to waste on you.","You study and actually learn something useful, which surprises everyone."]),{grade:R(6,12),smarts:R(1,3),happy:-3});cue={loc:"temple",g:"write",actor:actorFor("teacher"),label:"Study harder"}}
+    else if(k==="skip"){res=chance(.3)?r("The teacher sends a boy to find you. You're dragged back by the ear.",{grade:-10,happy:-4},"bad"):r("You spend the day at the river instead. The hieroglyphs will still be there tomorrow.",{grade:-8,happy:7});cue={loc:"river",g:"run",label:"Skip class"}}
+    else if(k==="teacher"){tr("schemer");res=r("The teacher eats the honey cake and discovers that your handwriting has improved.",{grade:5});cue={loc:"temple",g:"give",actor:actorFor("teacher"),prop:"bread",label:"Bribe the teacher"}}
+    else if(k==="harder")res=r(pick(["You're the first to arrive and the last to leave. Somebody notices.","You do the work of two people. One of them is your overseer.","You work through the midday heat while everyone else naps."]),{perf:R(8,15),happy:-4,health:-1});
+    else if(k==="slack")res=r(pick(["You find a shady spot and guard it all day.","You take a long lunch. It lasts until sunset.","You look busy. It's a skill."]),{perf:-10,happy:6});
+    else if(k==="flatter"){tr("schemer");res=chance(.5)?r("You tell the overseer he's as wise as Thoth. He agrees.",{perf:10},"good"):r("You tell the overseer he's as wise as Thoth. He asks what you want.",{perf:-5});cue.g="talk"}
+    else if(k==="raise"){cue.g="talk";if(chance(S.perf/130)){const x=R(3,8);S.bonus=(S.bonus||0)+x;res=r(`You ask for more. He grumbles, counts on his fingers, and gives you ${x} more deben a year.`,{happy:6},"good")}else res=r("You ask for more. He laughs until he has to sit down.",{perf:-5,happy:-4},"bad")}
+    else if(k==="retire"){S.pension=Math.round(jobPay()/2);const t=jobTitle();S.job=null;S.jobLvl=0;res=r(`You retire as ${t}. You'll get ${S.pension} deben a year, and you never have to get up before the sun again.`,{happy:15},"good");cue.g="wave"}
+    else{const t=jobTitle();S.job=null;S.jobLvl=0;S.bonus=0;res=r(`You quit your post as ${t}. Your overseer says nothing, which is worse.`,{happy:5});cue.g="wave"}
+    resolve(res,menuJob,cue)});
+  $("#sheet").querySelectorAll("[data-j]").forEach(b=>b.onclick=()=>{const j=jobOf(b.dataset.j);takeJob(j);S.pension=0;
+    resolve(r(`You start work. Your title is ${jobTitle()}. ${j.line}`,{happy:5},"good"),menuJob,{loc:JOB_LOC[j.k],g:j.k==="scribe"||j.k==="architect"?"write":j.k==="priest"?"pray":j.k==="soldier"?"punch":j.k==="musician"?"strum":"carry",actor:actorFor(j.k==="priest"?"priest":"man"),label:j.label})});
+  $("#sheet").querySelectorAll("[data-o]").forEach(b=>b.onclick=()=>{const o=ODD.find(x=>x.k===b.dataset.o);S.used.odd=1;
+    resolve(r(o.line,{deben:R(o.pay[0],o.pay[1]),health:-1}),menuJob,{loc:PLACE_ODD[o.k]||"market",g:o.k==="birds"?"flail":o.k==="onions"?"give":"carry",actor:actorFor(o.k==="birds"||o.k==="geese"?"goose":"woman"),label:o.label})});
+};
+
+/* ---------- people: more ways to interact ---------- */
+const COMPL=["a treasure","sharper than a scribe's reed","as steady as the Nile","the lotus of the whole street","braver than a hippo hunter","good company","a gift from Hathor","as clever as Thoth","sweeter than date wine","stronger than an ox"];
+const TOPICS=["whether cats can see ghosts","which is better, bread or beer, since they're made of the same thing","whether the Nile has an end","who built the pyramids, because nobody alive remembers","why Bes is so short","whether crocodiles really cry","why priests shave off their eyebrows","whether the stars are holes in the sky goddess","whether onions cure everything","what you'd take with you to the afterlife","which god you'd least like to meet in the dark","why the tax collector always knows","whether foreigners really sleep under wool","the best way to scare a hippo"];
+const RUMOURS=["eats fish on holy days","is afraid of geese","once fainted at the embalmer's","waters down their beer","talks to their donkey, and the donkey answers","wears a wig on top of another wig","was seen bowing to a statue of Set","can't swim and pretends to wash clothes instead","bribed the oracle","cried at a senet game"];
+ORDER.push("classmate");NPC_PLACE.classmate="river";
+Object.assign(INT_G,{compliment:"talk",chat:"talk",givemoney:"give",rumour:"talk",best:"hug",wedding:"drink",befriend:"wave",copy:"write",fightc:"punch",flirt:"wave",feed:"give",walk:"run",train:"point",vet:"pet",insultc:"point",prankc:"throw"});
+Object.assign(INT_PROP,{givemoney:"coin",feed:"bread"});
+function commonInt(p){
+  const P=p.name,rel=p.rel.toLowerCase();
+  return [{k:"compliment",label:"Compliment them",run:()=>{bondFx(p,R(2,6));const back=chance(p.bond/130);return r(`You tell your ${rel}, ${P}, that ${he(p)}'s ${pick(COMPL)}.${back?` ${He(p)} says you're ${pick(COMPL)}.`:""}`,{happy:back?4:1})}},
+   {k:"chat",label:"Have a conversation",run:()=>{bondFx(p,R(2,5));return r(`You and your ${rel}, ${P}, talk about ${pick(TOPICS)}.`,{happy:3,smarts:chance(.3)?1:0})}}];
+}
+function classInt(p){
+  const P=p.name,L=commonInt(p);
+  L.push({k:"befriend",label:"Become friends",run:()=>{if(chance(.3+p.bond/140)){p.type="friend";p.rel="Friend";bondFx(p,15);return r(`You and ${P} share your bread at midday. You're friends now.`,{happy:8},"good")}bondFx(p,-4);return r(`${P} already has friends, and tells you so.`,{happy:-5})}});
+  L.push({k:"copy",label:"Copy their work",run:()=>{tr("schemer");return chance(.6)?r(`You copy ${P}'s exercise word for word, including the mistake.`,{grade:6,maat:-2}):r(`The teacher catches you copying from ${P}. You both get the stick, which ${P} thinks is unfair.`,(bondFx(p,-12),{grade:-6,health:-4}),"bad")}});
+  L.push({k:"prankc",label:"Prank them",run:()=>{bondFx(p,chance(.5)?4:-8);tr("schemer");return r(pick([`You put a frog in ${P}'s ink pot.`,`You swap ${P}'s reed pen for a celery stalk.`,`You tell ${P} the teacher wants to see ${p.sex==="m"?"him":"her"}. The teacher does not.`]),{happy:6})}});
+  L.push({k:"insultc",label:"Insult them",run:()=>{bondFx(p,-18);tr("cruel");return r(`You tell ${P} that ${he(p)} writes like a goose walked across the papyrus.`,{maat:-3,happy:2},"bad")}});
+  L.push({k:"fightc",label:"Fight them",run:()=>{bondFx(p,-15);tr("fighter");S.flags.violence=1;return chance(.5)?r(`You fight ${P} behind the school and win.`,{happy:5,health:-3,grade:-3}):r(`You fight ${P} behind the school and lose.`,{health:-8,happy:-5,grade:-3},"bad")}});
+  if(S.age>=13&&!alive("lover").length&&!alive("spouse").length)L.push({k:"flirt",label:"Flirt with them",run:()=>{tr("romantic");if(chance(.25+p.bond/160+S.looks/400)){p.type="lover";p.rel="Sweetheart";bondFx(p,20);return r(`You pass ${P} a love poem on a flake of limestone. ${He(p)} keeps it.`,{happy:12},"good")}bondFx(p,-6);return r(`You pass ${P} a love poem. ${He(p)} corrects your spelling and hands it back.`,{happy:-8},"bad")}});
+  return L;
+}
+function petInt(p){
+  const P=p.name,sp=p.rel.toLowerCase();
+  if(!p.alive)return [{k:"miss",label:`Miss ${P}`,run:()=>r(`You still look for ${P} when you come home.`,{happy:-2})}];
+  const L=[{k:"feed",label:`Feed ${P}`,run:()=>{bondFx(p,6);return r(`You give ${P} the ${sp} ${pick(["a piece of roast duck","some bread soaked in milk","a fish head","a handful of dates"])}.`,{happy:4})}},
+    {k:"walk",label:`Take ${P} out`,run:()=>{bondFx(p,8);return chance(.12)?r(`${P} the ${sp} bites you on the hand. You probably deserved it.`,{health:-5,happy:-2},"bad"):r(`You take ${P} the ${sp} along the canal. Children follow you the whole way.`,{happy:6,health:2})}},
+    {k:"train",label:`Train ${P}`,run:()=>{bondFx(p,4);const s=p.species;
+      if(s==="Baby baboon")return chance(.6)?r(`${P} picks figs from the high branches and hands most of them to you.`,{deben:R(2,5),happy:4},"good"):r(`${P} picks figs from the high branches and eats every one.`,{happy:3});
+      if(s==="Tesem hound"||s==="Falcon"||s==="Cheetah")return chance(.6)?r(`${P} brings down a ${pick(["hare","duck","desert partridge"])}. Dinner is solved.`,{happy:6,health:2},"good"):r(`${P} watches the prey leave and then looks at you.`,{happy:1});
+      return r(`You try to teach ${P} to come when called. ${P} has other plans.`,{happy:3})}}];
+  if(S.deben>=3)L.push({k:"vet",label:"Take them to the animal healer (3 deben)",run:()=>{bondFx(p,3);return r(`The healer checks ${P}'s teeth and eyes and says the ${sp} is healthier than you are.`,{deben:-3,happy:3})}});
+  return L;
+}
+const baseInt=interactions;
+interactions=function(p){
+  if(p.type==="classmate")return p.alive?classInt(p):[];
+  if(p.type==="pet"&&p.species&&p.species!=="Cat")return petInt(p);
+  const L=baseInt(p);
+  if(!p.alive||p.type==="pet"||S.age<4)return L;
+  const P=p.name,X=commonInt(p),Y=[];
+  if(p.type==="friend"&&p.bond>=70&&!p.best)Y.push({k:"best",label:"Ask to be best friends",run:()=>{p.best=true;p.rel="Best friend";bondFx(p,10);return r(`You ask ${P} to be your best friend. ${He(p)} says ${he(p)} thought you already were.`,{happy:8},"good")}});
+  if(p.type==="spouse"&&!p.wed&&S.deben>=30)Y.push({k:"wedding",label:"Hold a wedding feast (30 deben)",run:()=>{p.wed=true;bondFx(p,15);const g=R(20,60)+S.fame*4;return r(`You and ${P} hold a wedding feast for ${g} guests. There's roast goose, a harpist, and more beer than anyone needs.`,{deben:-30,happy:15,fame:2},"good")}});
+  if(S.age>=10&&p.type!=="enemy"&&p.age>=4){const amt=S.deben>=400?50:S.deben>=60?10:5;if(S.deben>=amt)Y.push({k:"givemoney",label:`Give them ${amt} deben`,run:()=>{bondFx(p,amt>=50?15:8);tr("kind");return r(`You give ${P} ${amt} deben. ${He(p)} ${pick(["pretends to refuse, twice","counts it in front of you","blesses you by three different gods"])}.`,{deben:-amt,maat:2})}})}
+  if(S.age>=8)Y.push({k:"rumour",label:"Start a rumour about them",run:()=>{bondFx(p,chance(.5)?-14:0);tr("schemer");S.flags.lied=1;return r(`You start a rumour that ${P} ${pick(RUMOURS)}.`,{maat:-4,happy:2})}});
+  return X.concat(L,Y);
+};
+
+/* ---------- activities ---------- */
+CATS.push({k:"spa",label:"Barber & Bath",g:"𓁷"},{k:"learn",label:"Skills",g:"𓏞"},{k:"pets",label:"Animals",g:"𓃡"},{k:"gamble",label:"Games of Chance",g:"𓎟"},{k:"travel",label:"Travel",g:"𓊝"},{k:"fame",label:"Renown",g:"𓇼"},{k:"law",label:"Law & Family",g:"𓌃"},{k:"royal",label:"Royal Court",g:"𓀭"});
+const SK={harp:[3,"the harp"],stick:[3,"stick fighting"],boat:[2,"river piloting"],chariot:[2,"chariot driving"],adult:[2,"reading"],med:[3,"medicine"],akk:[2,"Akkadian"]};
+function train(k,done,o,lines){S.skills[k]=(S.skills[k]||0)+1;const n=S.skills[k],need=SK[k][0];
+  if(n===need)return r(done,o,"good");
+  if(n>need)return r(`You practise ${SK[k][1]}. You already know it, but it feels good to be good at something.`,{happy:3});
+  return r(`${pick(lines)} That's lesson ${n} of ${need}.`,o)}
+const stakeOpts=()=>({intro:"You can lose all of it.",q:"How much do you stake?",none:"You have nothing to stake.",opts:[1,5,20,100].filter(v=>v<=S.deben).map(v=>({l:v+" deben",v}))});
+function bet(v,p,mult,win,lose){const s=Math.min(S.deben,v??5);if(s<=0)return r("You have nothing to stake, so you watch.",{});return chance(p)?r(win+` You win ${Math.round(s*mult)} deben.`,{deben:Math.round(s*mult),happy:6},"good"):r(lose+` You lose ${s} deben.`,{deben:-s,happy:-4},"bad")}
+const royal=()=>S.cls==="royal"&&!S.flags.abd;
+const others=()=>S.people.filter(p=>p.alive&&p.type!=="pet"&&p.age>=14);
+ACTS.push(
+ /* barber & bath */
+ {c:"spa",k:"sp_barber",label:"Visit the barber",min:5,cost:2,run:()=>r("The barber works under a sycamore tree with a bronze razor. He shaves your head and tells you everything that happened in town this week.",{deben:-2,looks:3,happy:2})},
+ {c:"spa",k:"sp_bath",label:"Wash with natron",min:4,run:()=>r("You scrub yourself with natron, the same salt the embalmers use. Egyptians wash more than anyone else in the world, and think foreigners smell.",{health:2,looks:2})},
+ {c:"spa",k:"sp_massage",label:"Get an oil massage",min:14,cost:5,run:()=>r("An hour of warm moringa oil on your back. You forget your own name for a while.",{deben:-5,happy:8,health:3})},
+ {c:"spa",k:"sp_sugar",label:"Hair removal with sugar paste",min:14,cost:4,run:()=>r("A paste of honey and oil, pressed on and ripped off. Egyptians think body hair is unclean. You think this hurts.",{deben:-4,looks:5,happy:-3})},
+ {c:"spa",k:"sp_nails",label:"Henna your nails",min:8,cost:3,run:()=>{tr("vain");return r("Your nails are stained red-orange with henna. Pharaoh has a servant whose whole job is his fingernails.",{deben:-3,looks:3,happy:2})}},
+ {c:"spa",k:"sp_cone",label:"Wear a perfume cone",min:14,cost:6,run:()=>{tr("vain");return r("You put a cone of scented wax on your head for the party. It melts slowly through the evening and you smell wonderful.",{deben:-6,looks:4,happy:4})}},
+ {c:"spa",k:"sp_tattoo",label:"Get a tattoo",min:16,cost:8,item:"Tattoo",run:()=>chance(.75)?r("A woman pricks a small figure of Bes into your thigh with a bronze needle and soot. Dancers and musicians wear the same one for luck.",{deben:-8,looks:3,happy:4}):r("The tattoo was meant to be Bes. It looks more like a surprised frog.",{deben:-8,looks:-3,happy:-2},"bad")},
+ /* skills */
+ {c:"learn",k:"sk_harp",label:"Take harp lessons",min:7,cost:4,run:()=>train("harp","You can play the harp. Temples hire musicians, and so do parties.",{deben:-4,happy:5,smarts:2},["Your fingers bleed on the strings.","Your teacher is blind, like many harpists, and hears every wrong note.","You learn a song about enjoying life because nobody comes back from the dead."])},
+ {c:"learn",k:"sk_stick",label:"Train at stick fighting",min:8,run:()=>{tr("fighter");return train("stick","You're good with a fighting stick now. Soldiers train this way, and you'd win most street fights.",{health:5,looks:2},["You get hit on the knuckles more times than you can count.","You learn to block high. Then you learn to block low, the hard way.","Your teacher fights with a stick in each hand and no mercy."])}},
+ {c:"learn",k:"sk_boat",label:"Learn to pilot a boat",min:10,cost:5,run:()=>train("boat","You can read the river: its sandbanks, its winds and its moods. The wind blows south and the current runs north, so you can always get home.",{deben:-5,happy:4,smarts:2},["You run the boat onto a sandbank. Everyone gets out and pushes.","You learn why the hieroglyph for travelling south is a boat with its sail up."])},
+ {c:"learn",k:"sk_chariot",label:"Learn to drive a chariot",min:16,cost:30,run:()=>{tr("brave");return train("chariot","You can drive a chariot at full speed without dying. You're allowed to buy one now.",{deben:-30,happy:8,looks:2},["The horses decide where you're going.","You fall off the back at the first turn. The chariot finishes the lap without you."])}},
+ {c:"learn",k:"sk_read",label:"Learn to read as an adult",min:16,cost:20,need:()=>!S.lit,run:()=>{const x=train("adult","You can read. The walls of every temple are suddenly talking to you.",{deben:-20,smarts:6},["A retired scribe teaches you the first hundred signs. There are seven hundred more.","You learn that the owl is M and the quail chick is W. The rest is harder."]);if(S.skills.adult>=2)S.lit=true;return x}},
+ {c:"learn",k:"sk_med",label:"Study medicine",min:16,cost:40,need:()=>S.lit&&S.smarts>=50&&(S.skills.med||0)<3,run:()=>train("med","You've finished your medical training. You know that the heart speaks through the pulse, and you can work as a physician.",{deben:-40,smarts:5},["You memorise the cases in the surgical papyrus: examine, diagnose, then say whether it can be treated.","You learn to stitch a wound and to set a broken arm with splints and linen.","You learn forty uses for honey. It really does stop wounds going bad."])},
+ {c:"learn",k:"sk_akk",label:"Learn Akkadian",min:14,cost:15,need:()=>S.lit&&(S.skills.akk||0)<2,run:()=>train("akk","You can read Akkadian, the language kings use to write to each other. Very few Egyptians can.",{deben:-15,smarts:6,fame:1},["The signs are wedges pressed into clay. It looks like birds walked on it.","You practise by copying a letter in which a foreign king complains that Pharaoh sent too little gold."])},
+ {c:"learn",k:"sk_scroll",label:"Read a scroll",min:8,need:()=>S.lit||inSchool(),run:()=>{const b=pick([["The Tale of Sinuhe","A courtier flees Egypt, gets rich abroad, and begs to come home to be buried properly."],["The Shipwrecked Sailor","A sailor washes up on an island ruled by a giant talking snake."],["The Instruction of Ptahhotep","An old vizier's advice. Most of it is: listen more, talk less."],["The Eloquent Peasant","A robbed farmer complains so beautifully that the judges keep him talking on purpose."],["The Satire of the Trades","A father explains why every job except scribe is miserable."]]);
+   return chance(.8)?r(`You read '${b[0]}' from start to finish. ${b[1]}`,{smarts:R(2,4),happy:3}):r(`You pick up '${b[0]}' but can't get into it.`,{smarts:1})}},
+ /* animals */
+ {c:"pets",k:"an_market",label:"The animal market",min:5,open:b=>petShop(b)},
+ /* games of chance */
+ {c:"gamble",k:"gb_senet",label:"Play senet for stakes",min:12,pick:stakeOpts,run:v=>bet(v,.45+S.smarts/500,2,"Your last piece leaves the board first.","Your piece lands on the House of Water and has to start again.")},
+ {c:"gamble",k:"gb_dice",label:"Throw knucklebones",min:12,pick:stakeOpts,run:v=>bet(v,.45,2,"The bones land your way.","The bones land the other way.")},
+ {c:"gamble",k:"gb_wrestle",label:"Bet on a wrestling match",min:12,pick:stakeOpts,run:v=>bet(v,.4,2.5,"Your man throws the Nubian champion in the third round.","Your man is carried out by his friends.")},
+ {c:"gamble",k:"gb_joust",label:"Bet on the boatmen's jousting",min:12,pick:stakeOpts,run:v=>bet(v,.33,3,"Your crew knocks the other crew into the river with their poles.","Your crew goes into the river. One of them can't swim, which livens things up.")},
+ {c:"gamble",k:"gb_punt",label:"Buy a share in a voyage to Punt",min:16,cost:25,run:()=>chance(.12)?r("The ship comes home heavy with incense, ebony and gold. Your share is a small fortune.",{deben:R(180,480),happy:20,fame:2},"good"):r(pick(["The ship is lost somewhere on the Red Sea. So is your share.","The ship comes back with one baboon and a lot of excuses.","The captain sold the cargo in another port and has not been seen since."]),{deben:-25,happy:-4},"bad")},
+ /* travel */
+ {c:"travel",k:"tv_zoo",label:"Visit Pharaoh's menagerie",min:4,cost:3,run:()=>chance(.08)?r("You get too close to the baboons. One of them takes your wig and a piece of your finger.",{deben:-3,health:-6},"bad"):r(`You see ${pick(["a giraffe from Nubia","a bear from Syria","elephants from the far south","a cage of birds that lay an egg every day, which the keepers call chickens"])}. Kings collect strange animals to show how far their power reaches.`,{deben:-3,happy:7,smarts:1})},
+ {c:"travel",k:"tv_abydos",label:"Pilgrimage to Abydos",min:8,cost:15,run:()=>{tr("pious");return r("You sail to Abydos, where Osiris is buried, and leave a small stone with your name on it along the procession road. Thousands have done the same.",{deben:-15,maat:6,happy:5},"good")}},
+ {c:"travel",k:"tv_giza",label:"See the pyramids at Giza",min:8,cost:20,run:()=>r("The pyramids are already more than a thousand years old. Earlier visitors have scratched their names on the stones, so you add yours.",{deben:-20,happy:8,smarts:3})},
+ {c:"travel",k:"tv_faiyum",label:"Sail to the Faiyum oasis",min:8,cost:12,run:()=>r("In the city of Sobek the priests keep a sacred crocodile with gold rings in its ears. Visitors feed it cake and wine. It looks very pleased with its life.",{deben:-12,happy:7,maat:2})},
+ {c:"travel",k:"tv_cruise",label:"Take a river cruise",min:14,cost:40,run:()=>{const sp=one("spouse")||one("lover");if(sp)bondFx(sp,12);return r(`You drift downriver for ten days${sp?` with ${sp.name}`:""}, eating grapes and watching other people work.`,{deben:-40,happy:14,health:3},"good")}},
+ {c:"travel",k:"tv_byblos",label:"Voyage to Byblos",min:16,cost:60,run:()=>chance(.15)?r("A storm catches the ship off the coast. You spend two days tied to the mast and the rest of your life avoiding the sea.",{deben:-60,health:-12,happy:-6},"bad"):r("You sail up the coast to Byblos for cedar wood, which Egypt has none of. The locals drink wine instead of beer and think you're the strange one.",{deben:-60,happy:12,smarts:4,fame:1},"good")},
+ {c:"travel",k:"tv_punt",label:"Join an expedition to Punt",min:18,cost:150,run:()=>{tr("brave");if(chance(.06))return r("Fever takes half the crew on the Red Sea coast.",{},"bad","a fever on the road to Punt");
+   const mk=alive("pet").length<4&&chance(.4);if(mk){const p=person("pet",{name:pick(PET_NAMES),rel:"Baby baboon",age:1,bond:60});p.species="Baby baboon"}
+   return r(`You reach Punt, the land of incense. The houses stand on stilts and the trees bleed perfume.${mk?" A baby baboon follows you onto the ship and won't leave.":""}`,{deben:-150,happy:20,smarts:5,fame:5},"good")}},
+ /* renown */
+ {c:"fame",k:"fm_crier",label:"Pay a herald to praise you",min:14,cost:5,run:()=>{tr("vain");return r("A man walks through the market shouting your name and your virtues. He invents most of the virtues.",{deben:-5,fame:2})}},
+ {c:"fame",k:"fm_stela",label:"Commission a stela about yourself",min:18,cost:40,item:"Stela",run:()=>{tr("vain");return r(`A carved stone now stands by the road. It says: 'I gave bread to the hungry and clothes to the naked.' ${S.maat>=60?"That's mostly true.":"That's generous."}`,{deben:-40,fame:6,happy:4})}},
+ {c:"fame",k:"fm_feast",label:"Throw a public feast",min:16,cost:60,run:()=>r("You roast two oxen and open forty jars of beer for the whole street. People will talk about it for a year.",{deben:-60,fame:8,happy:8,maat:3},"good")},
+ {c:"fame",k:"fm_statue",label:"Commission a statue of yourself",min:20,cost:120,item:"Statue",run:()=>{tr("vain",2);return r("The sculptor gives you broad shoulders and no wrinkles. A statue shows who you'll be forever, so nobody asks for accuracy.",{deben:-120,fame:12,happy:6},"good")}},
+ {c:"fame",k:"fm_fest",label:"Sponsor a festival procession",min:20,cost:100,run:()=>{tr("pious");return r("You pay for the dancers, the incense and the new carrying poles for the god's boat. The high priest thanks you by name in front of the whole city.",{deben:-100,fame:10,maat:5},"good")}},
+ {c:"fame",k:"fm_out",label:"Have a public outburst",min:12,pick:()=>({intro:"Everyone will remember this.",q:"How bad?",opts:[{l:"Loud",v:1},{l:"Unhinged",v:2}]}),run:v=>{v=v??1;return v===1?r("You stand on a market stall and tell the whole town what you think of the price of onions.",{fame:2,happy:5}):chance(.3)?caught(1,"throwing a temple offering table into the sacred lake"):r("You throw a temple offering table into the sacred lake and announce that you're the son of a crocodile. People cross the street when they see you now.",{fame:6,looks:-2,maat:-5,happy:6})}},
+ /* law & family */
+ {c:"law",k:"lw_loan",label:"The grain lender",min:10,open:b=>loanMenu(b)},
+ {c:"law",k:"lw_will",label:"Your will",min:18,open:b=>willMenu(b)},
+ {c:"law",k:"lw_sue",label:"Take someone to court",min:16,pick:()=>({intro:"The local court is a group of respected neighbours. They take bribes, but they also take evidence.",q:"Who do you accuse?",none:"There's nobody you can accuse.",opts:others().map(p=>({l:p.name,s:p.rel,v:p.id}))}),run:v=>{const p=S.people.find(x=>x.id===v)||one("enemy")||others()[0];if(!p)return r("There's nobody to accuse.",{});bondFx(p,-25);
+   return chance(.3+S.smarts/250)?r(`You accuse ${p.name} of owing you for a donkey. The court agrees, and ${he(p)} pays in grain.`,{deben:R(10,50),happy:5},"good"):r(`The court finds that ${p.name} owes you nothing and that you've wasted everyone's morning. You pay the costs.`,{deben:-Math.min(S.deben,10),happy:-6},"bad")}},
+ {c:"law",k:"lw_adopt",label:"Adopt a child",min:20,cost:10,run:()=>{const c=person("child",{age:R(0,6),bond:60});tr("kind");return r(`A scribe writes the adoption down in front of witnesses, and ${c.name} is your ${c.rel.toLowerCase()} in law. Egyptians often adopted an heir this way.`,{deben:-10,happy:12,maat:4},"good")}},
+ {c:"law",k:"lw_name",label:"Take a new name",min:12,cost:5,pick:()=>({q:"Your new name",opts:[0,1,2].map(()=>pick(NAMES[S.sex])).filter((n,i,a)=>n!==S.name&&a.indexOf(n)===i).map(n=>({l:n,v:n}))}),run:v=>{const old=S.name;S.name=v||pick(NAMES[S.sex]);return r(`You're ${S.name} now. Egyptians believe a person only dies when their name stops being spoken, so ${old} has a problem.`,{deben:-5,happy:3})}},
+ {c:"law",k:"lw_move",label:"Move to another city",min:16,cost:20,pick:()=>({q:"Where to?",opts:CITIES.filter(c=>c!==S.city).map(c=>({l:c,v:c}))}),run:v=>{S.city=v||pick(CITIES.filter(c=>c!==S.city));return r(`You load everything onto a boat and move to ${S.city}. The bread tastes different here and nobody knows what you did.`,{deben:-20,happy:5})}},
+ /* royal court */
+ {c:"royal",k:"ry_serve",label:"Perform royal duties",min:10,need:royal,pick:()=>({q:"What will you do?",opts:[{l:"Open the granaries to the poor",v:0},{l:"Free prisoners from the mines",v:1},{l:"Pay for a new canal",v:2}]}),run:v=>{tr("kind");return r(["The royal granaries open and the whole city eats.","A hundred prisoners walk home from Nubia blessing your name.","A new canal brings water to fields that have never had any."][v??0],{respect:R(6,12),maat:6,fame:4,deben:-Math.min(S.deben,30)},"good")}},
+ {c:"royal",k:"ry_chaos",label:"Cause some chaos",min:10,need:royal,pick:()=>({q:"What will you do?",opts:[{l:"Raise taxes",v:0},{l:"Mock the priests of Amun",v:1},{l:"Cancel a festival",v:2}]}),run:v=>{v=v??0;tr("cruel");return v===0?r("The tax collectors go out with longer sticks. The treasury fills up.",{deben:80,respect:-12,maat:-6},"bad"):v===1?r("You ask the high priest, in front of the court, whether Amun can hear him or whether he just likes the sound of his own voice.",{respect:-8,happy:8,curse:chance(.3)?1:0}):r("You cancel the Opet festival because you're tired. The city goes very quiet.",{respect:-15,happy:-3,maat:-5},"bad")}},
+ {c:"royal",k:"ry_decree",label:"Issue a decree",min:12,need:royal,run:()=>r(pick(["You decree that every child in the city gets a free writing board.","You decree that cats may enter any house they like. They already did.","You decree that tax collectors must smile. It makes things worse.","You decree a day of rest for the tomb builders. They spend it complaining about you less."]),{respect:R(2,8),fame:2})},
+ {c:"royal",k:"ry_title",label:"Choose how you're addressed",min:8,need:royal,pick:()=>({q:"Your new title",opts:["Strong Bull","Beloved of Amun","Lord of the Two Lands","The One of the Sedge and the Bee"].map(t=>({l:t,v:t}))}),run:v=>{S.title=v||"Strong Bull";tr("vain");return r(`From today everyone must call you '${S.title}'. The scribes start recarving things.`,{happy:5,fame:1})}},
+ {c:"royal",k:"ry_lion",label:"Go on a royal lion hunt",min:16,need:royal,run:()=>{tr("brave");return chance(.07)?r("The lion had not been told who you are.",{},"bad","a lion that did not respect royalty"):r("You hunt lions from your chariot. One king had scarabs carved to boast that he killed a hundred and two.",{fame:6,happy:10,respect:4},"good")}},
+ {c:"royal",k:"ry_exec",label:"Have someone executed",min:18,need:()=>royal()&&others().length>0,pick:()=>({intro:"A word from you is enough.",q:"Who?",opts:others().map(p=>({l:p.name,s:p.rel,v:p.id}))}),run:v=>{const p=S.people.find(x=>x.id===v)||others()[0];if(!p)return r("You look around the court. Everyone is suddenly very useful.",{});p.alive=false;tr("cruel",2);S.flags.violence=1;S.flags.cruel=1;return r(`You have ${p.name} put to death. The court applauds, because the court always applauds.`,{maat:-22,respect:-10,happy:-4,curse:1},"bad")}},
+ {c:"royal",k:"ry_abd",label:"Give up your titles",min:16,need:royal,run:()=>{S.flags.abd=1;return r("You hand back the crook and the flail and walk out of the palace in plain linen. Nobody stops you. Nobody knows how.",{happy:10,fame:5,maat:4})}},
+ /* crime */
+ {c:"crime",k:"cr_mischief",label:"Make mischief",min:6,pick:()=>({q:"What will you do?",opts:[{l:"Let the temple geese out",v:0},{l:"Paint a moustache on a statue",v:1},{l:"Put a fish in the tax collector's sandal",v:2}]}),run:v=>{tr("schemer");return chance(.25)?caught(1,"at it"):r(["Forty sacred geese walk through the market like they own it.","The statue of the mayor looks better with it, honestly.","He finds it at noon, in the heat."][v??0],{happy:8,maat:-2})}},
+ {c:"crime",k:"cr_stall",label:"Steal from a market stall",min:8,run:()=>{tr("thief");S.flags.stole=1;return chance(.3)?caught(1,"with a melon under your shirt"):r(`You walk off with ${pick(["a melon","a string of dried fish","a jar of honey","a pair of sandals"])} while the seller argues with someone else.`,{deben:R(1,4),maat:-4})}},
+ {c:"crime",k:"cr_donkey",label:"Steal a donkey",min:12,need:()=>!S.items.includes("Donkey"),run:()=>{tr("thief");S.flags.stole=1;if(chance(.35))return caught(2,"leading someone else's donkey out of town");S.items.push("Donkey");return r("You lead a donkey away at night. It complains the whole way, but it's yours now.",{maat:-7,happy:4})}},
+ {c:"crime",k:"cr_burgle",label:"Burgle a house",min:14,pick:()=>({q:"Which house?",opts:[{l:"A farmer's hut",s:"low risk",v:0},{l:"A scribe's townhouse",s:"some risk",v:1},{l:"A noble's villa",s:"high risk",v:2}]}),run:v=>{v=v??0;tr("thief");S.flags.stole=1;return chance([.15,.3,.5][v])?caught(v?2:1,"climbing out of a window with a sack"):r(["You get away with a sack of grain and a goose.","You get away with copper tools and a good linen sheet.","You get away with silver cups, a gold collar, and a guard dog that liked you."][v],{deben:[R(3,8),R(15,40),R(60,160)][v],maat:-8})}},
+ {c:"crime",k:"cr_caravan",label:"Rob a caravan",min:16,run:()=>{tr("thief");tr("fighter");S.flags.stole=1;S.flags.violence=1;const x=Math.random();if(x<.08)return r("The caravan had archers.",{},"bad","an arrow while robbing a caravan");if(x<.45)return caught(3,"by the desert police, the Medjay");return r("You and three others stop a donkey train on the oasis road and take the incense and the copper.",{deben:R(80,220),maat:-14,curse:chance(.2)?1:0},"bad")}},
+ {c:"crime",k:"cr_kill",label:"Hire a killer",min:18,cost:80,need:()=>others().length>0,pick:()=>({intro:"A man at the docks says he can make it look like the river did it.",q:"Who?",opts:others().map(p=>({l:p.name,s:p.rel,v:p.id}))}),run:v=>{const p=S.people.find(x=>x.id===v)||others()[0];if(!p)return r("You change your mind.",{});tr("cruel",2);S.flags.violence=1;S.flags.cruel=1;
+   if(chance(.25)){S.deben=Math.max(0,S.deben-80);return sentence(R(4,8),`The killer is caught and gives your name before they've finished asking.`)}
+   p.alive=false;return r(`${p.name} is found in the reeds. Everyone says the river took ${p.sex==="m"?"him":"her"}. Ma'at knows better.`,{deben:-80,maat:-25,curse:1,happy:-5},"bad")}},
+ /* healers */
+ {c:"health",k:"hl_eye",label:"See the eye healer",min:4,cost:6,run:()=>r("Egypt has doctors just for eyes, because of the dust and the flies. He paints your eyelids with honey and green copper ore. It stings and it works.",{deben:-6,health:R(5,10)},"good")},
+ {c:"health",k:"hl_sekh",label:"Visit a priest of Sekhmet",min:0,cost:10,run:()=>{tr("pious");return chance(.7)?r("The lion goddess sends plagues, so her priests are the ones who know how to stop them. He chants, checks your pulse, and gives you a bitter drink.",{deben:-10,health:R(8,16),maat:2},"good"):r("The priest of Sekhmet says the goddess is still deciding about you.",{deben:-10,happy:-3})}},
+ {c:"health",k:"hl_wise",label:"Visit the wise woman",min:0,cost:3,run:()=>{tr("mystic");const x=Math.random();return x<.3?r("The wise woman tells you which dead relative is causing your trouble and how to make peace with them. You feel lighter.",{deben:-3,curse:-1,happy:5},"good"):x<.75?r("She rubs you with something that smells like a dead fish and tells you to sleep facing north. You do feel better.",{deben:-3,health:R(4,12)}):r("She looks at you for a long time and gives you your money back. That's not a good sign.",{happy:-8},"bad")}},
+ {c:"health",k:"hl_dream",label:"Talk to a dream interpreter",min:8,cost:5,run:()=>r(`You tell him everything that's been on your mind. He says dreaming of ${pick(["a deep well means prison, so stay honest","eating crocodile means you'll become an official","your own face in a mirror means a new marriage","a cat means a good harvest"])}. Mostly it helps to have said it out loud.`,{deben:-5,happy:9})},
+ {c:"health",k:"hl_fert",label:"Take a fertility test",min:16,max:45,cost:4,need:()=>alive("spouse").length>0,run:()=>{if(chance(.35)){const c=person("child",{age:0,bond:90});return r(`The healer puts an onion by the bed overnight to see whether the scent passes through by morning. Whatever that proves, ${c.name} is born before the next flood.`,{deben:-4,happy:15},"good")}return r("The healer puts an onion by the bed overnight to see whether the scent passes through by morning. It's a real test from the medical papyri. The result is unclear, and so is the science.",{deben:-4,happy:2})}},
+ /* more fun, love, gods, body */
+ {c:"fun",k:"fn_tale",label:"Listen to a storyteller",min:4,cost:1,pick:()=>({q:"What kind of story?",opts:[{l:"A funny one",v:0},{l:"A frightening one",v:1},{l:"An old epic",v:2}]}),run:v=>r(["He tells the one about the two brothers and the talking cow. You laugh until beer comes out of your nose.","He tells the one about the dead priest who walks at night looking for his own name. You walk home fast.","He tells the war of Horus and Set, all eighty years of it. You come out wiser and stiffer."][v??0],{deben:-1,happy:[9,4,5][v??0],smarts:[0,1,3][v??0]})},
+ {c:"fun",k:"fn_night",label:"Go out for the night",min:16,cost:3,pick:()=>({q:"Which beer house?",opts:["The Drunken Baboon","House of the Leaping Fish","Hathor's Cup"].map(n=>({l:n,v:n}))}),run:v=>{tr("party");v=v||"The Drunken Baboon";const x=Math.random();if(x<.2&&!alive("lover").length&&!alive("spouse").length){const p=person("lover",{sex:S.sex==="m"?"f":"m",age:Math.max(16,S.age+R(-4,4)),bond:60});return r(`At ${v} you dance with ${p.name} until the lamps burn out. You're seeing each other now.`,{deben:-3,happy:12},"good")}
+   return x<.4?r(`You wake up behind ${v} wearing somebody else's wig.`,{deben:-3,happy:5,health:-5}):r(`${v} is loud, hot and full of people singing the wrong words. It's a great night.`,{deben:-3,happy:10,health:-2})}},
+ {c:"fun",k:"fn_hippo",label:"Join a hippo hunt",min:16,run:()=>{tr("brave",2);const x=Math.random();return x<.07?r("The hippo comes up under your boat.",{},"bad","a hippo you were trying to hunt"):x<.5?r("The hippo dives and is gone. You get a long day in a small boat.",{happy:-2}):r("Your harpoon holds. The whole village eats hippo for a week, and the farmers thank you, because hippos flatten crops.",{happy:12,fame:3,health:-3},"good")}},
+ {c:"fun",k:"fn_garden",label:"Work in the garden",min:6,run:()=>r(`You plant ${pick(["coriander and onions","a fig tree","lettuce, which Egyptians believe does things for romance","a row of blue cornflowers"])} and carry water to it all afternoon.`,{happy:5,health:2})},
+ {c:"body",k:"mb_walk",label:"Go for a walk",min:4,run:()=>r(pick(["You walk along the canal at dusk when the swallows come out.","You walk to the edge of the fields, where the black earth stops and the red desert starts in a single step.","You walk the whole length of the town wall and count the cats. Forty-one."]),{happy:4,health:3})},
+ {c:"body",k:"mb_diet",label:"Eat better",min:12,run:()=>r("Less bread and beer, more fish, lentils and figs. You last nine days, which is a record.",{health:5,looks:2,happy:-3})},
+ {c:"love",k:"lv_noble",label:"Ask the matchmaker for a rich match",min:18,cost:30,need:()=>!alive("spouse").length&&!alive("lover").length,run:()=>{if(chance(.2+S.fame/120+S.looks/300)){const p=person("lover",{sex:S.sex==="m"?"f":"m",age:Math.max(16,S.age+R(-5,3)),bond:55});const d=R(40,160);return r(`The matchmaker introduces you to ${p.name}, whose family owns land. They send ${d} deben in gifts to show they're serious.`,{deben:d-30,happy:10,fame:2},"good")}return r("The matchmaker looks at your house, your sandals and your teeth, and says she'll send word.",{deben:-30,happy:-5})}},
+ {c:"gods",k:"gd_wish",label:"Pray for something",min:5,pick:()=>({q:"What do you ask for?",opts:[{l:"Wealth",v:0},{l:"Health",v:1},{l:"Love",v:2},{l:"Children",v:3},{l:"Happiness",v:4}]}),run:v=>{v=v??4;tr("pious");const g=["Renenutet, the cobra goddess of the harvest","Sekhmet","Hathor","Taweret","Bes"][v];if(chance(.25))return r(`You pray to ${g}. Something shifts.`,[{deben:R(8,30)},{health:12},{looks:5,happy:6},{happy:8},{happy:14}][v],"good");return r(`You pray to ${g}. Nothing happens that you can see, but you feel heard.`,{maat:2,happy:2})}},
+ /* market shops */
+ {c:"shop",k:"sh_jewel",label:"Nebnefer the jeweller",min:8,open:b=>shopMenu("jeweller",b)},
+ {c:"shop",k:"sh_shady",label:"Shady Hori's bargain gems",min:8,open:b=>shopMenu("shady",b)},
+ {c:"shop",k:"sh_cloth",label:"The linen seller",min:6,open:b=>shopMenu("clothier",b)},
+ {c:"shop",k:"sh_music",label:"The instrument maker",min:6,open:b=>shopMenu("music",b)},
+ {c:"shop",k:"sh_boats",label:"The boatyard",min:14,open:b=>shopMenu("boats",b)},
+ {c:"shop",k:"sh_stable",label:"The animal yard",min:14,open:b=>shopMenu("stable",b)},
+ {c:"shop",k:"sh_broker",label:"The seller of houses",min:16,open:b=>shopMenu("broker",b)},
+ {c:"shop",k:"sh_tomb",label:"The tomb builders",min:10,open:b=>shopMenu("tomb",b)}
+);
+Object.assign(ACT_CUE,{sp_barber:["market","touchface","man"],sp_bath:["river","swim"],sp_massage:["home","sleep","woman"],sp_sugar:["home","flail","woman"],sp_nails:["home","reach","woman"],sp_cone:["home","touchface",null,"jar"],sp_tattoo:["market","flail","woman"],
+ sk_harp:["home","strum","man"],sk_stick:["fields","punch","man"],sk_boat:["river","carry","man"],sk_chariot:["desert","run","man"],sk_read:["temple","write","teacher"],sk_med:["temple","write","teacher"],sk_akk:["temple","write","teacher"],sk_scroll:["home","write"],
+ gb_senet:["market","play","man",null,1],gb_dice:["market","throw","man",null,1],gb_wrestle:["river","punch","man"],gb_joust:["river","wave","boat"],gb_punt:["river","give","man"],
+ tv_zoo:["temple","look","goat"],tv_abydos:["desert","pray"],tv_giza:["desert","lookup"],tv_faiyum:["river","look","croc"],tv_cruise:["river","drink","boat",null,1],tv_byblos:["river","wave","boat"],tv_punt:["river","carry","boat"],
+ fm_crier:["market","give","man"],fm_stela:["temple","write","man"],fm_feast:["home","drink","friend",null,1],fm_statue:["temple","point","man"],fm_fest:["temple","wave","priest"],fm_out:["market","flail","woman"],
+ lw_sue:["market","point","scribe"],lw_adopt:["home","hug","baby"],lw_name:["temple","write","scribe"],lw_move:["river","carry","boat"],
+ ry_serve:["temple","give","priest"],ry_chaos:["temple","point","priest"],ry_decree:["temple","write","scribe"],ry_title:["temple","point","priest"],ry_lion:["desert","throw",null,"stick"],ry_exec:["temple","point","soldier"],ry_abd:["temple","wave","priest"],
+ cr_mischief:["market","throw","man"],cr_stall:["market","reach","woman"],cr_donkey:["fields","run","goat",null,1],cr_burgle:["market","crouch",null,null,1],cr_caravan:["desert","punch","man"],cr_kill:["market","give","stranger",null,1],
+ hl_eye:["home","touchface","man"],hl_sekh:["temple","pray","priest"],hl_wise:["home","none","woman",null,1],hl_dream:["temple","talk","priest"],hl_fert:["home","none","woman"],
+ fn_tale:["market","none","man",null,1],fn_night:["market","drink","woman",null,1],fn_hippo:["river","throw","hippo","stick"],fn_garden:["home","carry"],mb_walk:["river","run"],mb_diet:["home","eat"],lv_noble:["temple","wave","crush"],gd_wish:["temple","pray","priest"]});
+menuCat=function(k){
+  const c=CATS.find(x=>x.k===k),list=visibleActs(k),back=()=>menuCat(k);
+  openSheet(`<p class="kicker">Activities</p><h2>${c.label}</h2><div class="choices">${list.map(a=>{
+    const done=!a.open&&S.used[a.k],poor=a.cost&&S.deben<a.cost,owned=a.item&&S.items.includes(a.item);
+    const tag=a.open?"›":done?"Done this year":owned?"Owned":poor?`Need ${a.cost} deben`:a.cost?`${a.cost} deben`:a.sub||"";
+    return `<button class="choice" data-k="${a.k}" ${done||poor||owned?"disabled":""}><span>${esc(a.label)}</span><small>${esc(tag)}</small></button>`}).join("")}</div><button class="close" id="cl">Back</button>`);
+  $("#cl").onclick=menuActs;
+  $("#sheet").querySelectorAll(".choice").forEach(b=>b.onclick=()=>{const a=ACTS.find(x=>x.k===b.dataset.k);
+    if(a.open)return a.open(back);
+    actGo(a,actCue(a),back,c.label)});
+};
+function actGo(a,cue,back,kick){
+  const go=v=>{S.used[a.k]=1;if(a.item)S.items.push(a.item);resolve(a.run(v),back,cue)};
+  if(!a.pick)return go();
+  const o=a.pick();if(!o.opts.length)return resolve(r(o.none||"You can't do that right now.",{}),back,{});
+  pickSheet(kick,a.label,o.intro,o.q,o.opts,x=>go(x.v),back);
+}
+
+/* ---------- your life, and the next generation ---------- */
+menuLife=function(){
+  const t=traitList(),sk=Object.keys(SK).filter(k=>(S.skills[k]||0)>=SK[k][0]).map(k=>SK[k][1]);
+  const row=(a,b,last)=>`<div class="row"${last?' style="border:0"':""}><span>${a}</span><span>${b}</span></div>`;
+  openSheet(`<p class="kicker">Age ${S.age}${S.gen>1?" · Generation "+S.gen:""}</p><h2>${esc(S.name)}${S.title?", "+esc(S.title):""}</h2>
+   <div class="card" style="margin-bottom:12px">
+    ${row("Born to",esc(CLASSES[S.cls].label)+", "+esc(S.city))}
+    ${row("Schooling",inSchool()?"At the House of Life":S.lit?"Can read and write":"None")}
+    ${row("Work",S.job?esc(jobTitle()):S.pension?"Retired":S.jail?"Prisoner in the mines":"None")}
+    ${row("Known as",t.length?esc(t.join(", ")):"Nobody special yet")}
+    ${row("Renown",S.fame+"/100")}${S.cls==="royal"?row("Respect of the people",S.respect+"/100"):""}
+    ${row("Skills",sk.length?esc(sk.join(", ")):"None yet")}
+    ${row("Tomb",esc(bestTomb()),true)}
+   </div>
+   ${S.alive?"":`<div class="choices" style="margin-bottom:8px">${heirHtml()}</div>`}
+   <div class="choices"><button class="choice" id="newL"><span>Start a new life</span><small>${S.alive?"Ends this one":""}</small></button></div>
+   <button class="close" id="cl">Close</button>`);
+  document.querySelectorAll("#sheet [data-heir]").forEach(b=>b.onclick=()=>{closeSheet();continueAs(S.people.find(p=>p.id==b.dataset.heir))});
+  $("#newL").onclick=()=>{openSheet(`<h2>Start a new life?</h2><p class="body">${S.alive?"This life ends here. Nobody will weigh this heart.":"Ready for another go on the scale?"}</p><div class="choices"><button class="choice" id="yes">Yes, new life</button></div><button class="close" id="cl">Cancel</button>`);$("#yes").onclick=()=>{closeSheet();$("#hall").hidden=true;showStart()}};
+};
+function heirs(){return S.people.filter(p=>p.type==="child"&&p.alive)}
+function heirHtml(){return heirs().slice(0,3).map(c=>`<button class="big-btn ghost" data-heir="${c.id}">Continue as ${esc(c.name)}, your ${c.rel.toLowerCase()} (${c.age})</button>`).join("")}
+function bindHeir(){document.querySelectorAll("[data-heir]").forEach(b=>b.onclick=()=>continueAs(S.people.find(p=>p.id==b.dataset.heir)))}
+function continueAs(c){
+  const old=S,sibs=heirs().filter(p=>p.id!==c.id);
+  const share=old.heir===c.id||!sibs.length?old.deben:old.heir&&sibs.some(p=>p.id===old.heir)?Math.round(old.deben*.1):Math.round(old.deben/(sibs.length+1));
+  W.reset();
+  S={v:2,name:c.name,sex:c.sex,cls:old.cls,city:old.city,age:c.age,alive:true,health:R(70,95),happy:R(45,75),smarts:R(30,80),looks:R(30,85),maat:50,deben:share,curse:old.curse>=3?1:0,job:null,
+     school:!!CLASSES[old.cls].school||old.lit,years:{},flags:{},cool:{},recent:[],amb:{},tr:{},items:old.items.filter(i=>KEEP.test(i)&&(old.heir===c.id||!sibs.length||PROP_UP[i]===undefined)),people:[],nid:1,used:{},gen:(old.gen||1)+1,fame:Math.round((old.fame||0)/3)};
+  mig();
+  const dead=person("parent",{sex:old.sex,name:old.name,age:old.age,bond:c.bond});dead.alive=false;
+  const sp=old.people.find(p=>p.type==="spouse"&&p.alive);if(sp)person("parent",{sex:sp.sex,name:sp.name,age:sp.age,bond:R(50,85)});
+  sibs.forEach(s=>person("sibling",{sex:s.sex,name:s.name,age:s.age,bond:R(35,80)}));
+  old.people.filter(p=>p.type==="pet"&&p.alive).forEach(q=>{const n=person("pet",{name:q.name,rel:q.rel,age:q.age,bond:50});n.species=q.species});
+  W.setAge(S.age);$("#hall").hidden=true;
+  log(`You are ${S.name}, ${S.sex==="m"?"son":"daughter"} of ${old.name}. Your parent's heart has been weighed. Now it's your turn.`);
+  log(share?`You inherit ${share} deben${S.items.length?" and "+S.items.join(", ").toLowerCase():""}.`:"There was nothing left to inherit.",null,share?"good":"dim");
+  save();render();
+}
+
+/* ---------- wiring ---------- */
+const jailed=f=>()=>{if(busy)return;if(S.jail>0)jailMenu();else f()};
+$("#bAct").onclick=jailed(menuActs);$("#bJob").onclick=jailed(menuJob);$("#bPeople").onclick=jailed(menuPeople);$("#bMore").onclick=guard(menuAssets);
+$("#ava").onclick=guard(menuLife);$("#who").onclick=guard(menuLife);
+W.on(t=>{if(busy||pending||!S||!S.alive)return;if(S.jail>0)return jailMenu();
+  if(t.type==="npc"){const p=S.people.find(x=>x.id===t.id);if(p)personMenu(p,true)}
+  else if(t.type==="stranger")placeMenu("market",["friend","gossip","fight","pick","help","cr_stall"],"A townsperson",true);
+  else placeMenu(t.key,t.only,t.label)},
+ ()=>{if(busy||pending||!S||!S.alive)return;if(S.jail>0)return jailMenu();travelMenu()});
+
 function start(data){
   const saved=(data&&data.S)||load();
-  if(saved&&saved.v===2&&saved.name){S=saved;pending=null;W.setAge(S.age);render()}
-  else{S={v:2,name:"Nebamun",sex:"m",cls:"farmer",city:"Thebes",age:0,alive:true,health:90,happy:80,smarts:50,looks:55,maat:50,deben:0,curse:0,job:null,school:false,years:{0:[{t:"Choose how you're born to begin.",c:"",tone:"dim"}]},flags:{},cool:{},recent:[],amb:{},tr:{},items:[],people:[],nid:1,used:{}};render();showStart()}
+  if(saved&&saved.v===2&&saved.name){S=saved;pending=null;mig();W.setAge(S.age);render()}
+  else{S={v:2,name:"Nebamun",sex:"m",cls:"farmer",city:"Thebes",age:0,alive:true,health:90,happy:80,smarts:50,looks:55,maat:50,deben:0,curse:0,job:null,school:false,years:{0:[{t:"Choose how you're born to begin.",c:"",tone:"dim"}]},flags:{},cool:{},recent:[],amb:{},tr:{},items:[],people:[],nid:1,used:{}};mig();render();showStart()}
 }
 window.claude?.hot?.snapshot?.(()=>({S}));
 window.claude?.hot?.ready?window.claude.hot.ready(start):start(window.claude?.hot?.data??{});
